@@ -1,5 +1,17 @@
-<script setup()>
+<script setup>
+import { ref } from 'vue'
+import AuthModal from './AuthModal.vue'
 
+const authModal = ref(null)
+
+const openAuthModal = () => {
+  authModal.value.open()
+}
+
+const onLogin = (credentials) => {
+  console.log('Пользователь вошёл:', credentials)
+  // Здесь можно сохранить токен, перенаправить и т.д.
+}
 </script>
 
 <template>
@@ -9,9 +21,11 @@
             <p>Wavely</p>
         </div>
         <div class="header-content">
-            <button class="login-btn">Войти</button>
+            <button class="login-btn" @click="openAuthModal">Войти</button>
             <button class="register-btn">Регистрация</button>
         </div>
+
+        <AuthModal ref="authModal" @login="onLogin" />
     </div>
 </template>
 
