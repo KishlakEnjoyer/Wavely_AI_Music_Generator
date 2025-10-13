@@ -33,30 +33,28 @@ const onLogin = (credentials) => {
 .login-btn {
     background-color: transparent;
     color: white;
-    border: 2px solid white;
-}
-.login-btn:hover{
-    font-size: 14px;
-    color: #00F0FF;
-    border-color: #00F0FF;
-    transition: all 0.3s ease-out;
+    border-color: transparent;
+    &:hover {
+        color: #00F0FF;
+        border-color: #00F0FF;
+        background-color: #007bff;
+        transition: all 0.3s ease-out;
+        transform: none;
+    }
 }
 
 .register-btn {
     background-color: white;
     color: black;
     border-color:  transparent;
+    &:hover {
+        border-color: #00F0FF;
+        color: #00F0FF;
+        transition: all 0.3s ease-out;
+        background-color: #007bff;
+        transform: none;
+    }
 }
-.register-btn:hover{
-    font-size: 14px;
-    border-color: #00F0FF;
-    color: #00F0FF;
-    transition: all 0.3s ease-out;
-}
-.register-btn:click{
-    background-color: rgba(0, 0, 0, 0.2);
-}   
-
 
 .header-content {
     display: flex;
@@ -73,7 +71,7 @@ const onLogin = (credentials) => {
     padding: 10px 40px;
     border-radius: 29px;
     font-size: 13px;
-    border: 2px solid white;
+    border: solid white;
     font-family: 'Jaldi', sans-serif;
     transition: all 0.3s ease;
 }
