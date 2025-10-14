@@ -50,13 +50,39 @@ const handleLogin = async () => {
       // Но можно явно указать политику:
       await supabase.auth.setSession({ access_token, refresh_token })
     }
-
+    alert("Вход выполнен! Здравствуйте, " + data.user.nickname)
     close()
 
   } catch (err) {
     console.error('Неожиданная ошибка:', err)
     alert('Произошла ошибка при входе')
   }
+}
+
+const handleRegister = async () => {
+  const { data, error } = await supabase.auth.signUp({
+    email: '2016Elektronik123@gmail.com',
+    password: 'qwerty777'
+  })
+
+  if (error) {
+    alert('Ошибка: ' + error.message)
+    return
+  }
+
+  // 🟢 Создаём профиль
+  const { error: profileError } = await supabase.from('profiles').insert({
+    id: data.user.id,        // ← UUID из auth.users
+    nickname: 'my_nickname'  // ← можно взять из формы
+  })
+
+  if (profileError) {
+    console.error('Ошибка создания профиля:', profileError)
+    // Можно удалить пользователя, если профиль не создался (опционально)
+    return
+  }
+
+  alert('Регистрация успешна!')
 }
 
 // Обработчик клика по оверлею

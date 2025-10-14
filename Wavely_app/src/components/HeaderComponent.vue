@@ -4,6 +4,19 @@ import AuthModal from './AuthModal.vue'
 
 const authModal = ref(null)
 
+
+const loginModal = ref(null)
+
+const onLoginSuccess = ({ user, session }) => {
+  console.log('Авторизация прошла успешно:', user)
+  // Можно перенаправить, обновить UI и т.д.
+}
+
+// Открыть модал
+const openLogin = () => {
+  loginModal.value.open()
+}
+
 const openAuthModal = () => {
   authModal.value.open()
 }
