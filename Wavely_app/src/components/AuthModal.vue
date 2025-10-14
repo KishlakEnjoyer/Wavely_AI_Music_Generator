@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue'
+import { supabase } from '@/lib/supaBaseClient'
 
 const show = ref(false)
 const email = ref('')
@@ -25,10 +26,37 @@ const close = () => {
   show.value = false
 }
 
-const handleLogin = () => {
-  console.log('Логин:', email.value, password.value)
-  emit('login', { email: email.value, password: password.value })
-  close()
+const handleLogin = async () => {
+  try {
+    // 🚀 Логинимся через Supabase
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: email.value,
+      password: password.value
+    })
+
+    if (error) {
+      alert('Ошибка входа: ' + error.message)
+      return
+    }
+
+    console.log('Успешный вход:', data.user)
+
+    // ✅ Эмитим событие только при успехе
+    emit('login', { user: data.user, session: data.session })
+
+    // 💡 Если нужно сохранить сессию (например, "Запомнить меня")
+    if (rememberMe.value) {
+      // Supabase сам сохраняет сессию в localStorage по умолчанию
+      // Но можно явно указать политику:
+      await supabase.auth.setSession({ access_token, refresh_token })
+    }
+
+    close()
+
+  } catch (err) {
+    console.error('Неожиданная ошибка:', err)
+    alert('Произошла ошибка при входе')
+  }
 }
 
 // Обработчик клика по оверлею

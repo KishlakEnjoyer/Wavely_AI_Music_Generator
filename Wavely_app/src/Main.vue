@@ -1,6 +1,9 @@
 <script>
 import HeaderComponent from './components/HeaderComponent.vue';
 import CenterComponent from './components/CenterComponent.vue';
+import { supabase } from './lib/supaBaseClient';
+
+
 
 export default {
   components: {
