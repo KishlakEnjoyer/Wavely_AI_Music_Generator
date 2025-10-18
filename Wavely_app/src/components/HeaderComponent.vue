@@ -30,7 +30,7 @@ const onLogin = (credentials) => {
 <template>
     <div class="header">
         <div class="header-content">
-            <img src="./icons/logo.svg"></img>
+            <img src="../assets/icons/logo.svg"></img>
             <p>Wavely</p>
         </div>
         <div class="header-content">
