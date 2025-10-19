@@ -1,29 +1,38 @@
 <script setup>
 import { ref } from 'vue'
 import AuthModal from './AuthModal.vue'
+import RegisterModal from './RegisterModal.vue'
 
 const authModal = ref(null)
-
+const registerModal = ref(null)
 
 const loginModal = ref(null)
-
-const onLoginSuccess = ({ user, session }) => {
-  console.log('Авторизация прошла успешно:', user)
-  // Можно перенаправить, обновить UI и т.д.
-}
-
-// Открыть модал
-const openLogin = () => {
-  loginModal.value.open()
-}
 
 const openAuthModal = () => {
   authModal.value.open()
 }
 
-const onLogin = (credentials) => {
-  console.log('Пользователь вошёл:', credentials)
-  // Здесь можно сохранить токен, перенаправить и т.д.
+const openRegisterModal = () => {
+    registerModal.value.open()
+}
+
+//Переключение между окнами
+const switchToRegister = () => {
+  authModal.value.close()
+  registerModal.value.open()
+}
+
+const switchToAuth = () => {
+  registerModal.value.close()
+  authModal.value.open()
+}
+
+const onLogin = (data) => {
+  console.log('Вход успешен:', data)
+}
+
+const onRegister = (data) => {
+  console.log('Регистрация успешна:', data)
 }
 </script>
 
@@ -35,10 +44,11 @@ const onLogin = (credentials) => {
         </div>
         <div class="header-content">
             <button class="login-btn" @click="openAuthModal">Войти</button>
-            <button class="register-btn">Регистрация</button>
+            <button class="register-btn" @click="openRegisterModal">Регистрация</button>
         </div>
 
-        <AuthModal ref="authModal" @login="onLogin" />
+        <AuthModal ref="authModal" @login="onLogin" @switch-to-register="switchToRegister"/>
+        <RegisterModal ref="registerModal" @register="onRegister" @switch-to-login="switchToAuth"/>
     </div>
 </template>
 
