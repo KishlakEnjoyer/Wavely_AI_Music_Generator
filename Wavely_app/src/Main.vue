@@ -52,7 +52,7 @@ export default {
         }
 
         body {
-            color: white;
+            color: black;
             min-height: 100vh;
             overflow-x: hidden;
             position: relative;
