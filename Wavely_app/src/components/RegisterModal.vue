@@ -56,19 +56,15 @@ const handleRegister = async () => {
       return
     }
 
-    // Создаём профиль (никнейм — из email)
-    if (data.user) {
-      const nickname = email.value.split('@')[0]
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .insert({
-          id: data.user.id,
-          nickname: nickname,
-          updated_at: new Date().toISOString()
-        })
+    const nickname = email.value.split('@')[0]
 
-      if (profileError) {
-        console.warn('Профиль не создан:', profileError)
+    if (data.user) {
+      const { error: updateError } = await supabase.auth.updateUser({
+        data: { display_name: nickname }
+      })
+
+      if (updateError) {
+        console.warn('Не удалось обновить display_name:', updateError)
       }
     }
 
