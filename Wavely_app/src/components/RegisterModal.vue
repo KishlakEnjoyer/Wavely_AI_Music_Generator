@@ -61,9 +61,9 @@ const handleRegister = async () => {
       const nickname = email.value.split('@')[0]
       const { error: profileError } = await supabase
         .from('profiles')
-        .upsert({
+        .insert({
           id: data.user.id,
-          nickname,
+          nickname: nickname,
           updated_at: new Date().toISOString()
         })
 
@@ -72,7 +72,7 @@ const handleRegister = async () => {
       }
     }
 
-    alert('Регистрация успешна! Проверьте почту для подтверждения.')
+    alert('Регистрация успешна!')
     emit('register', { user: data?.user })
     close()
   } catch (err) {
