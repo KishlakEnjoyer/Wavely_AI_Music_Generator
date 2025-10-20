@@ -1,5 +1,5 @@
 <script>
-import MainPage from './Views/MainPage.vue';
+import MainPage from './views/MainPage.vue';
 export default{
     components:{
         MainPage
