@@ -1,14 +1,10 @@
-<script>
-import MainPage from './views/MainPage.vue';
-export default{
-    components:{
-        MainPage
-    }
-}
+<script setup>
+import { RouterLink, RouterView } from 'vue-router';
+
 </script>
 
 <template>
-    <MainPage/>
+    <RouterView/>
 </template>
 
 <style>
