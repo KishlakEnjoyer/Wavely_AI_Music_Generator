@@ -12,6 +12,9 @@ const rememberMe = ref(false)
 defineExpose({
   open: () => {
     show.value = true
+  },
+  close: () => {
+    show.value = false
   }
 })
 
@@ -132,7 +135,8 @@ const onOverlayClick = (e) => {
 
         <!-- Register Link -->
         <p class="register-link">
-          Нет аккаунта? <a href="#" @click.prevent="$emit('switch-to-register')">регистрация</a>
+          Нет аккаунта? 
+          <a href="#" @click.prevent="emit('switch-to-register')">Регистрация</a>
         </p>
       </form>
     </div>

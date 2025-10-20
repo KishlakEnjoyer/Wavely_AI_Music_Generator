@@ -6,8 +6,6 @@ import RegisterModal from './RegisterModal.vue'
 const authModal = ref(null)
 const registerModal = ref(null)
 
-const loginModal = ref(null)
-
 const openAuthModal = () => {
   authModal.value.open()
 }
