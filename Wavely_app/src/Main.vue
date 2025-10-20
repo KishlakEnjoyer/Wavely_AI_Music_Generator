@@ -1,6 +1,9 @@
 <script>
 import HeaderComponent from './components/HeaderComponent.vue';
 import CenterComponent from './components/CenterComponent.vue';
+import { supabase } from './lib/supaBaseClient';
+
+
 
 export default {
   components: {
@@ -45,11 +48,11 @@ export default {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family:'Jaldi', sans-serif;
         }
 
         body {
-            color: white;
+            color: black;
             min-height: 100vh;
             overflow-x: hidden;
             position: relative;

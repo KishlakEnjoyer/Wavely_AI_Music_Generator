@@ -1,17 +1,52 @@
-<script setup()>
+<script setup>
+import { ref } from 'vue'
+import AuthModal from './AuthModal.vue'
+import RegisterModal from './RegisterModal.vue'
 
+const authModal = ref(null)
+const registerModal = ref(null)
+
+const openAuthModal = () => {
+  authModal.value.open()
+}
+
+const openRegisterModal = () => {
+    registerModal.value.open()
+}
+
+//Переключение между окнами
+const switchToRegister = () => {
+  authModal.value.close()
+  registerModal.value.open()
+}
+
+const switchToAuth = () => {
+  registerModal.value.close()
+  authModal.value.open()
+}
+
+const onLogin = (data) => {
+  console.log('Вход успешен:', data)
+}
+
+const onRegister = (data) => {
+  console.log('Регистрация успешна:', data)
+}
 </script>
 
 <template>
     <div class="header">
         <div class="header-content">
-            <img src="./icons/logo.svg"></img>
+            <img src="../assets/icons/logo.svg"></img>
             <p>Wavely</p>
         </div>
         <div class="header-content">
-            <button class="login-btn">Войти</button>
-            <button class="register-btn">Регистрация</button>
+            <button class="login-btn" @click="openAuthModal">Войти</button>
+            <button class="register-btn" @click="openRegisterModal">Регистрация</button>
         </div>
+
+        <AuthModal ref="authModal" @login="onLogin" @switch-to-register="switchToRegister"/>
+        <RegisterModal ref="registerModal" @register="onRegister" @switch-to-login="switchToAuth"/>
     </div>
 </template>
 
@@ -19,30 +54,28 @@
 .login-btn {
     background-color: transparent;
     color: white;
-    border: 2px solid white;
-}
-.login-btn:hover{
-    font-size: 14px;
-    color: #00F0FF;
-    border-color: #00F0FF;
-    transition: all 0.3s ease-out;
+    border-color: transparent;
+    &:hover {
+        color: #00F0FF;
+        border-color: #00F0FF;
+        background-color: #007bff;
+        transition: all 0.3s ease-out;
+        transform: none;
+    }
 }
 
 .register-btn {
     background-color: white;
     color: black;
     border-color:  transparent;
+    &:hover {
+        border-color: #00F0FF;
+        color: #00F0FF;
+        transition: all 0.3s ease-out;
+        background-color: #007bff;
+        transform: none;
+    }
 }
-.register-btn:hover{
-    font-size: 14px;
-    border-color: #00F0FF;
-    color: #00F0FF;
-    transition: all 0.3s ease-out;
-}
-.register-btn:click{
-    background-color: rgba(0, 0, 0, 0.2);
-}   
-
 
 .header-content {
     display: flex;
@@ -59,7 +92,7 @@
     padding: 10px 40px;
     border-radius: 29px;
     font-size: 13px;
-    border: 2px solid white;
+    border: solid white;
     font-family: 'Jaldi', sans-serif;
     transition: all 0.3s ease;
 }
