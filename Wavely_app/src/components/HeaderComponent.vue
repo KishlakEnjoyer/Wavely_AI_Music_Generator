@@ -106,7 +106,7 @@ const onRegister = (data) => {
     height: 97px;
     width: 100%;
     padding: 0 160px;
-    position: fixed;
+    position: absolute;
     top: 0;
     left: 0;
     z-index: 1000;
