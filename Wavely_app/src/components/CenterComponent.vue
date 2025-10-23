@@ -1,15 +1,148 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { supabase } from '../lib/supabase.js'
+import { musicApi } from '../lib/musicApi.js'
+import AuthModal from './AuthModal.vue'
+import RegisterModal from './RegisterModal.vue'
 
 const promptText = ref('')
 const isHovered = ref(false)
 const isPressed = ref(false)
+const user = ref(null)
+const isGenerating = ref(false)
+const generationStatus = ref('')
+const currentJobId = ref(null)
+const showAuthModal = ref(false)
+const generatedTrackUrl = ref(null)
+const generatedTrackBlob = ref(null)
+
+// Modal refs
+const authModal = ref(null)
+const registerModal = ref(null)
 
 const hasText = computed(() => promptText.value.trim().length > 0)
+const isAuthenticated = computed(() => user.value !== null)
 
-const submitPrompt = () => {
-  if (hasText.value) {
-    console.log('Промпт отправлен:', promptText.value)
+// Проверяем авторизацию при загрузке компонента
+onMounted(async () => {
+  const { data: { session } } = await supabase.auth.getSession()
+  user.value = session?.user || null
+
+  // Слушаем изменения авторизации
+  supabase.auth.onAuthStateChange((event, session) => {
+    user.value = session?.user || null
+  })
+})
+
+const submitPrompt = async () => {
+  if (!hasText.value || isGenerating.value) return
+  
+  // Проверяем авторизацию
+  if (!isAuthenticated.value) {
+    authModal.value.open()
+    return
+  }
+
+  try {
+    isGenerating.value = true
+    generationStatus.value = 'Отправляем запрос на генерацию...'
+    
+    // Отправляем запрос на генерацию (15 секунд, wav формат)
+    const response = await musicApi.generateMusic(promptText.value.trim(), 15, 'wav')
+    currentJobId.value = response.job_id
+    generationStatus.value = 'Генерация начата, ожидаем завершения...'
+    
+    // Отслеживаем статус генерации
+    await musicApi.pollUntilComplete(
+      response.job_id,
+      (status) => {
+        switch (status.status) {
+          case 'queued':
+            generationStatus.value = 'В очереди на обработку...'
+            break
+          case 'processing':
+            generationStatus.value = 'Генерируем музыку...'
+            break
+        }
+      }
+    )
+    
+    generationStatus.value = 'Генерация завершена! Скачиваем файл...'
+    
+    // Скачиваем готовый файл
+    const audioBlob = await musicApi.downloadFile(response.job_id)
+    
+    // Создаем URL для воспроизведения
+    const audioUrl = URL.createObjectURL(audioBlob)
+    generatedTrackUrl.value = audioUrl
+    generatedTrackBlob.value = audioBlob
+    
+    // Сохраняем трек в базу данных
+    await saveTrackToDatabase(promptText.value.trim(), audioUrl, audioBlob)
+    
+    generationStatus.value = 'Готово! Трек сохранен.'
+    
+    // Очищаем форму
+    promptText.value = ''
+    
+    // Показываем успешное завершение
+    setTimeout(() => {
+      isGenerating.value = false
+      // НЕ очищаем generationStatus и аудиоплеер, чтобы пользователь мог прослушать трек
+      currentJobId.value = null
+    }, 1000)
+    
+  } catch (error) {
+    console.error('Ошибка генерации:', error)
+    generationStatus.value = `Ошибка: ${error.message}`
+    
+    setTimeout(() => {
+      isGenerating.value = false
+      generationStatus.value = ''
+      currentJobId.value = null
+    }, 3000)
+  }
+}
+
+const saveTrackToDatabase = async (prompt, audioUrl, audioBlob) => {
+  try {
+    // Загружаем аудиофайл в Supabase Storage
+    const fileName = `track_${Date.now()}_${user.value.id}.wav`
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('tracks')
+      .upload(fileName, audioBlob, {
+        contentType: 'audio/wav'
+      })
+
+    if (uploadError) throw uploadError
+
+    // Получаем публичный URL файла
+    const { data: { publicUrl } } = supabase.storage
+      .from('tracks')
+      .getPublicUrl(fileName)
+
+    // Сохраняем информацию о треке в базу данных
+    const { data, error } = await supabase
+      .from('tracks')
+      .insert({
+        titleTrack: prompt.substring(0, 100), // Ограничиваем длину заголовка
+        pathToFile: publicUrl,
+        idGenre: 1, // Пока ставим дефолтный жанр
+        idMood: 1, // Пока ставим дефолтное настроение
+        tempoTrack: null, // Можно будет добавить анализ темпа позже
+        durationTrack: 15, // 15 секунд как указано в требованиях
+        dateCreation: new Date().toISOString().split('T')[0],
+        publicTrack: true,
+        authorId: user.value.id
+      })
+      .select()
+
+    if (error) throw error
+    
+    console.log('Трек успешно сохранен:', data)
+  } catch (error) {
+    console.error('Ошибка сохранения трека:', error)
+    // Не прерываем процесс, просто логируем ошибку
   }
 }
 
@@ -19,6 +152,44 @@ const handlePress = () => {
   setTimeout(() => {
     isPressed.value = false
   }, 300)
+}
+
+// Authentication handlers
+const openAuthModal = () => authModal.value.open()
+const openRegisterModal = () => registerModal.value.open()
+
+const switchToRegister = () => {
+  authModal.value.close()
+  registerModal.value.open()
+}
+
+const switchToAuth = () => {
+  registerModal.value.close()
+  authModal.value.open()
+}
+
+const onLogin = (data) => {
+  user.value = data.user
+  console.log('Вход успешен:', data)
+}
+
+const onRegister = (data) => {
+  user.value = data.user
+  console.log('Регистрация успешна:', data)
+}
+
+// Функция скачивания трека
+const downloadTrack = () => {
+  if (!generatedTrackBlob.value) return
+  
+  const url = URL.createObjectURL(generatedTrackBlob.value)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `wavely-track-${Date.now()}.wav`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
 }
 </script>
 
@@ -32,28 +203,66 @@ const handlePress = () => {
         <div class="prompt-form">
             <form @submit.prevent="submitPrompt">
                 <div class="input-wrapper">
-                    <input v-model="promptText" type="text" placeholder="Введите свою уникальную и интересную идею..."
-                        class="prompt-input" required>
-                    <button type="submit" class="submit-button"                         
-                        :class="{ 
-                          'active': hasText, 
-                          'hovered': hasText && isHovered,
-                          'pressed': isPressed
-                        }"
-                        @mouseenter="isHovered = true"
-                        @mouseleave="isHovered = false"
-                        @mousedown="handlePress"
-                        @mouseup="isPressed = false"
-                        @touchstart="handlePress"
-                        @touchend="isPressed = false">
-                        <svg width="21" height="21" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <input v-model="promptText" 
+                           type="text" 
+                           placeholder="Введите свою уникальную и интересную идею..."
+                           class="prompt-input" 
+                           :disabled="isGenerating"
+                           required>
+                    <button type="submit" 
+                            class="submit-button"                         
+                            :class="{ 
+                              'active': hasText && !isGenerating, 
+                              'hovered': hasText && isHovered && !isGenerating,
+                              'pressed': isPressed,
+                              'generating': isGenerating
+                            }"
+                            :disabled="isGenerating || !hasText"
+                            @mouseenter="isHovered = true"
+                            @mouseleave="isHovered = false"
+                            @mousedown="handlePress"
+                            @mouseup="isPressed = false"
+                            @touchstart="handlePress"
+                            @touchend="isPressed = false">
+                        <svg v-if="!isGenerating" width="21" height="21" viewBox="0 0 21 21" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M10.5 18.9584V2.04169M10.5 2.04169L2.04163 10.5M10.5 2.04169L18.9583 10.5"
                                 stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
                         </svg>
+                        <div v-else class="loading-spinner"></div>
                         <div class="overlay"></div>
                     </button>
                 </div>
             </form>
+            
+            <!-- Информация об авторизации -->
+            <div v-if="!isAuthenticated" class="auth-info">
+                <p>Для генерации музыки необходимо <button @click="openAuthModal" class="auth-link">авторизоваться</button></p>
+            </div>
+            
+            <!-- Статус генерации под формой -->
+            <div v-if="isGenerating || (generationStatus && !isGenerating)" class="generation-status-below">
+                <p>{{ generationStatus }}</p>
+                <div v-if="isGenerating" class="progress-bar">
+                    <div class="progress-fill"></div>
+                </div>
+            </div>
+            
+            <!-- Аудиоплеер для воспроизведения музыки -->
+            <div v-if="generatedTrackUrl && !isGenerating" class="audio-player">
+                <h3>Ваша музыка готова!</h3>
+                <audio controls :src="generatedTrackUrl" class="music-player">
+                    Ваш браузер не поддерживает аудиоплеер.
+                </audio>
+                <div class="track-actions">
+                    <button @click="downloadTrack" class="download-btn">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M8 11L4 7H6V3H10V7H12L8 11Z" fill="currentColor"/>
+                            <path d="M2 13H14V15H2V13Z" fill="currentColor"/>
+                        </svg>
+                        Скачать
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
     <div class="logo-decor">
@@ -77,6 +286,18 @@ const handlePress = () => {
     <div class="bottom-container">
 
     </div>
+    
+    <!-- Authentication Modals -->
+    <AuthModal 
+        ref="authModal" 
+        @login="onLogin" 
+        @switch-to-register="switchToRegister" 
+    />
+    <RegisterModal 
+        ref="registerModal" 
+        @register="onRegister" 
+        @switch-to-auth="switchToAuth" 
+    />
 </template>
 
 <style scoped>
@@ -134,6 +355,7 @@ p {
 .prompt-form {
     margin-top: 30px;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
 }
@@ -209,6 +431,164 @@ p {
 .submit-button.pressed .overlay {
     opacity: 1;
     transform: scale(1);
+}
+
+.submit-button.generating {
+    background: linear-gradient(-43deg, rgba(49, 206, 244, 0.7), rgba(232, 46, 204, 0.7));
+    cursor: not-allowed;
+    opacity: 0.8;
+}
+
+.submit-button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.loading-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top: 2px solid rgba(255, 255, 255, 1);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.generation-status {
+    margin-top: 20px;
+    text-align: center;
+    color: white;
+}
+
+.generation-status-below {
+    margin-top: 20px;
+    text-align: center;
+    color: white;
+}
+
+.generation-status p,
+.generation-status-below p {
+    margin-bottom: 10px;
+    font-size: 14px;
+    opacity: 0.9;
+}
+
+.progress-bar {
+    width: 300px;
+    height: 4px;
+    background-color: rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
+    margin: 0 auto;
+    overflow: hidden;
+}
+
+.progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #31CEF4, #E82ECC);
+    border-radius: 2px;
+    animation: progress 2s ease-in-out infinite;
+}
+
+@keyframes progress {
+    0% { width: 0%; }
+    50% { width: 70%; }
+    100% { width: 100%; }
+}
+
+/* Стили для аудиоплеера */
+.audio-player {
+    margin-top: 30px;
+    padding: 20px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 15px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    text-align: center;
+    max-width: 400px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.audio-player h3 {
+    color: white;
+    margin-bottom: 15px;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.music-player {
+    width: 100%;
+    margin-bottom: 15px;
+    border-radius: 8px;
+    outline: none;
+}
+
+.music-player::-webkit-media-controls-panel {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.track-actions {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+}
+
+.download-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background: linear-gradient(135deg, #31CEF4, #E82ECC);
+    border: none;
+    border-radius: 25px;
+    color: white;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.download-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(49, 206, 244, 0.3);
+}
+
+.download-btn:active {
+    transform: translateY(0);
+}
+
+.auth-info {
+    margin-top: 20px;
+    text-align: center;
+    color: white;
+}
+
+.auth-info p {
+    font-size: 14px;
+    opacity: 0.8;
+}
+
+.auth-link {
+    background: none;
+    border: none;
+    color: #31CEF4;
+    text-decoration: underline;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0;
+    margin: 0;
+}
+
+.auth-link:hover {
+    color: #E82ECC;
+}
+
+.prompt-input:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
 }
 
 .overlay {

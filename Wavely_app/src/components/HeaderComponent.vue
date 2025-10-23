@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import { supabase } from '@/lib/supaBaseClient'
+import { supabase } from '../lib/supabase.js'
 import AuthModal from './AuthModal.vue'
 import RegisterModal from './RegisterModal.vue'
 
