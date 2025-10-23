@@ -1,5 +1,8 @@
 <script setup>
 import { ref, computed } from 'vue'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
 
 const promptText = ref('')
 const isHovered = ref(false)
@@ -9,7 +12,7 @@ const hasText = computed(() => promptText.value.trim().length > 0)
 
 const submitPrompt = () => {
   if (hasText.value) {
-    console.log('Промпт отправлен:', promptText.value)
+    router.push({ name: 'promptPage' })
   }
 }
 
