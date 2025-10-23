@@ -46,9 +46,16 @@ const handleRegister = async () => {
   }
 
   try {
+    const nickname = email.value.split('@')[0]
+
     const { data, error } = await supabase.auth.signUp({
       email: email.value,
-      password: password.value
+      password: password.value,
+      options: {
+        data: {
+          display_name: nickname // 👈 Сохраняем в user_metadata (опционально)
+        }
+      }
     })
 
     if (error) {
@@ -56,20 +63,15 @@ const handleRegister = async () => {
       return
     }
 
-    // Создаём профиль (никнейм — из email)
-    if (data.user) {
-      const nickname = email.value.split('@')[0]
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .insert({
-          id: data.user.id,
-          nickname: nickname,
-          updated_at: new Date().toISOString()
-        })
-
-      if (profileError) {
-        console.warn('Профиль не создан:', profileError)
+    // ✅ Обновляем Display name через updateUser
+    const { error: updateError } = await supabase.auth.updateUser({
+      data: {
+        display_name: nickname // 👈 Это попадёт в поле "Display name" в админке!
       }
+    })
+
+    if (updateError) {
+      console.warn('Не удалось обновить Display name:', updateError)
     }
 
     alert('Регистрация успешна!')
