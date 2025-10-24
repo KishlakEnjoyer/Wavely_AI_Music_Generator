@@ -75,7 +75,7 @@ const handleLogout = async () => {
             <!-- Отображаем ссылку с никнеймом, если пользователь авторизован -->
             <template v-else>
                 <RouterLink to="/profile" class="user-nickname" >
-                  {{ currentUser.user_metadata?.name || currentUser.email }}
+                  {{ currentUser.user_metadata?.display_name || currentUser.email }}
                 </RouterLink>
                 <button @click="handleLogout" class="logout-btn">Выйти</button>
             </template>

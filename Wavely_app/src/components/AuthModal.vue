@@ -53,7 +53,7 @@ const handleLogin = async () => {
       // Но можно явно указать политику:
       await supabase.auth.setSession({ access_token, refresh_token })
     }
-    alert("Вход выполнен! Здравствуйте, " + data.user.nickname)
+    alert("Вход выполнен! Здравствуйте, " + data.user.user_metadata.display_name)
     close()
 
   } catch (err) {

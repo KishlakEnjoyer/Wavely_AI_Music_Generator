@@ -48,7 +48,7 @@ const submitPrompt = async () => {
     generationStatus.value = 'Отправляем запрос на генерацию...'
     
     // Отправляем запрос на генерацию (15 секунд, wav формат)
-    const response = await musicApi.generateMusic(promptText.value.trim(), 15, 'wav')
+    const response = await musicApi.generateMusic(promptText.value.trim(), 20, 'wav')
     currentJobId.value = response.job_id
     generationStatus.value = 'Генерация начата, ожидаем завершения...'
     
