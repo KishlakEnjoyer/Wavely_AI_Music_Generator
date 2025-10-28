@@ -1,24 +1,149 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
+import { supabase } from '../lib/supabase.js'
 
+// Твой существующий код...
 const promptText = ref('')
 const isHovered = ref(false)
 const isPressed = ref(false)
-
 const hasText = computed(() => promptText.value.trim().length > 0)
+const submitPrompt = () => { if (hasText.value) console.log('Промпт отправлен:', promptText.value) }
+const handlePress = () => { if (!hasText.value) return; isPressed.value = true; setTimeout(() => isPressed.value = false, 300) }
 
-const submitPrompt = () => {
-  if (hasText.value) {
-    console.log('Промпт отправлен:', promptText.value)
+// Supabase данные
+const tracks = ref([])
+const loading = ref(true)
+const error = ref(null)
+const user = ref(null)
+
+// Уведомление
+const notification = ref({
+  show: false,
+  message: '',
+  type: 'info'
+})
+
+const formatDuration = (seconds) => {
+  if (!seconds) return '0:00'
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${mins}:${secs.toString().padStart(2, '0')}`
+}
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()}`
+}
+
+onMounted(async () => {
+  const { data: { user: currentUser } } = await supabase.auth.getUser()
+  user.value = currentUser
+
+  try {
+    const { data, error: err } = await supabase
+      .from('tracks')
+      .select('idTrack, titleTrack, durationTrack, dateCreation, authorId, publicTrack')
+      .eq('publicTrack', true)
+      .order('dateCreation', { ascending: false })
+
+    if (err) throw err
+
+    const trackIds = data.map(t => t.idTrack)
+    let likesMap = {}
+    const userLikes = {}
+
+    if (trackIds.length > 0) {
+      // Загружаем ВСЕ лайки для этих треков
+      const { data: likesData, error: likesErr } = await supabase
+        .from('likes')
+        .select('idTrack')
+        .in('idTrack', trackIds)
+
+      if (likesErr) {
+        console.error('Ошибка загрузки лайков:', likesErr)
+      } else if (likesData && Array.isArray(likesData)) {
+        likesMap = likesData.reduce((acc, like) => {
+          acc[like.idTrack] = (acc[like.idTrack] || 0) + 1 // ✅ Исправлено: idTrack
+          return acc
+        }, {})
+      }
+
+      // Загружаем лайки ТЕКУЩЕГО пользователя
+      if (user.value) {
+        const { data: userLikesData, error: userLikesErr } = await supabase
+          .from('likes')
+          .select('idTrack')
+          .eq('authorId', user.value.id)
+          .in('idTrack', trackIds)
+
+        if (userLikesErr) {
+          console.error('Ошибка загрузки моих лайков:', userLikesErr)
+        } else if (userLikesData && Array.isArray(userLikesData)) {
+          userLikesData.forEach(like => {
+            userLikes[like.idTrack] = true // ✅ Исправлено: idTrack
+          })
+        }
+      }
+    }
+
+    tracks.value = data.map(track => ({
+      id: track.idTrack,
+      title: track.titleTrack,
+      author: track.authorId?.substring(0, 8) || 'Аноним',
+      duration: formatDuration(track.durationTrack),
+      date: formatDate(track.dateCreation),
+      likesCount: likesMap[track.idTrack] || 0,
+      isLikedByUser: !!userLikes[track.idTrack]
+    }))
+
+  } catch (e) {
+    error.value = e.message
+    console.error('Ошибка загрузки треков:', e)
+  } finally {
+    loading.value = false
+  }
+})
+
+const toggleLike = async (index) => {
+  if (!user.value) {
+    showNotification('Пожалуйста, войдите в аккаунт, чтобы ставить лайки', 'info')
+    return
+  }
+
+  const track = tracks.value[index]
+  const isNowLiked = !track.isLikedByUser
+
+  try {
+    if (isNowLiked) {
+      await supabase.from('likes').insert({
+        idTrack: track.id,
+        authorId: user.value.id
+      })
+      tracks.value[index].likesCount += 1
+    } else {
+      await supabase
+        .from('likes')
+        .delete()
+        .match({ idTrack: track.id, authorId: user.value.id })
+      tracks.value[index].likesCount -= 1
+    }
+
+    tracks.value[index].isLikedByUser = isNowLiked
+    // Опционально: показать уведомление об успехе
+    // showNotification(isNowLiked ? 'Лайк добавлен!' : 'Лайк убран', 'success')
+
+  } catch (e) {
+    console.error('Ошибка при лайке:', e)
+    showNotification('Не удалось обновить лайк', 'error') // ✅ Исправлено: было alert
   }
 }
 
-const handlePress = () => {
-  if (!hasText.value) return
-  isPressed.value = true
+const showNotification = (message, type = 'info') => {
+  notification.value = { show: true, message, type }
   setTimeout(() => {
-    isPressed.value = false
-  }, 300)
+    notification.value.show = false
+  }, 3000)
 }
 </script>
 
@@ -79,9 +204,6 @@ const handlePress = () => {
             <div class="center-melody">
                 <div class="last-posted" style="padding: 25px 0px 0px 0px;">
                     <!-- Поиск, Фильтр, Сортировка -->
-
-
-
                     <div class="controls-row">
                         <div class="search-box">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -117,59 +239,73 @@ const handlePress = () => {
                             </select>
                         </div>
                     </div>
-
-
-
-
-
-
-
-
-
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <p style="padding: 20px 0px;font-size: 23px;">Каталог композиций</p>
-
-                        <svg  width="10" height="16" viewBox="0 0 10 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M6.13331 8L-2.80221e-05 1.86667L1.86664 0L9.86664 8L1.86664 16L-2.80221e-05 14.1333L6.13331 8Z" fill="#FEF7FF"/>
-                        </svg>
                     </div>
+
+
                     <div class="track-list">
                         <!-- Заглушка: 4 одинаковых трека -->
-                        <div v-for="n in 8" :key="n" class="track-item">
+                        <div v-for="(track, index) in tracks" :key="track.id" class="track-item">
                             <div class="track-left">
-                                <svg class="heart-logo" width="23" height="23" viewBox="0 0 30 27" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M26.7217 3.1491C26.0407 2.46777 25.2321 1.9273 24.3422 1.55855C23.4522 1.1898 22.4984 1 21.5351 1C20.5717 1 19.6179 1.1898 18.7279 1.55855C17.838 1.9273 17.0294 2.46777 16.3484 3.1491L14.9351 4.56243L13.5217 3.1491C12.1461 1.77351 10.2804 1.00071 8.33505 1.00071C6.38968 1.00071 4.52398 1.77351 3.14839 3.1491C1.7728 4.52469 1 6.39039 1 8.33577C1 10.2811 1.7728 12.1468 3.14839 13.5224L14.9351 25.3091L26.7217 13.5224C27.403 12.8414 27.9435 12.0329 28.3123 11.1429C28.681 10.253 28.8708 9.29908 28.8708 8.33577C28.8708 7.37245 28.681 6.41857 28.3123 5.52863C27.9435 4.63868 27.403 3.83011 26.7217 3.1491Z" stroke="#F3F3F3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                                </svg>
+                                <!-- Сердце -->
+                                <span @click.stop="toggleLike(index)" class="heart-icon" style="cursor: pointer;">
+                                    <svg class="heart-logo" v-if="!track.isLikedByUser" width="23" height="23" viewBox="0 0 30 27" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M26.7217 3.1491C26.0407 2.46777 25.2321 1.9273 24.3422 1.55855C23.4522 1.1898 22.4984 1 21.5351 1C20.5717 1 19.6179 1.1898 18.7279 1.55855C17.838 1.9273 17.0294 2.46777 16.3484 3.1491L14.9351 4.56243L13.5217 3.1491C12.1461 1.77351 10.2804 1.00071 8.33505 1.00071C6.38968 1.00071 4.52398 1.77351 3.14839 3.1491C1.7728 4.52469 1 6.39039 1 8.33577C1 10.2811 1.7728 12.1468 3.14839 13.5224L14.9351 25.3091L26.7217 13.5224C27.403 12.8414 27.9435 12.0329 28.3123 11.1429C28.681 10.253 28.8708 9.29908 28.8708 8.33577C28.8708 7.37245 28.681 6.41857 28.3123 5.52863C27.9435 4.63868 27.403 3.83011 26.7217 3.1491Z" stroke="#F3F3F3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                    </svg>
 
-                                <span class="track-title">NeuroFunk4ever</span>
+                                    <svg v-else class="heart-logo" width="23" height="23" viewBox="0 0 29 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M26.2217 2.6491C25.5407 1.96777 24.7321 1.4273 23.8422 1.05855C22.9522 0.689796 21.9984 0.5 21.0351 0.5C20.0717 0.5 19.1179 0.689796 18.2279 1.05855C17.338 1.4273 16.5294 1.96777 15.8484 2.6491L14.4351 4.06243L13.0217 2.6491C11.6461 1.27351 9.78043 0.500713 7.83505 0.500713C5.88968 0.500713 4.02398 1.27351 2.64839 2.6491C1.2728 4.02469 0.5 5.89039 0.5 7.83577C0.5 9.78114 1.2728 11.6468 2.64839 13.0224L14.4351 24.8091L26.2217 13.0224C26.903 12.3414 27.4435 11.5329 27.8123 10.6429C28.181 9.75296 28.3708 8.79908 28.3708 7.83577C28.3708 6.87245 28.181 5.91857 27.8123 5.02863C27.4435 4.13868 26.903 3.33011 26.2217 2.6491Z" fill="url(#paint0_linear_273_11)" stroke="url(#paint1_linear_273_11)" stroke-linecap="round" stroke-linejoin="round"/>
+                                        <defs>
+                                        <linearGradient id="paint0_linear_273_11" x1="3.43506" y1="4.00244" x2="24.4351" y2="21.0024" gradientUnits="userSpaceOnUse">
+                                            <stop stop-color="#26CEE6"/>
+                                            <stop offset="1" stop-color="#DA27F5"/>
+                                        </linearGradient>
+                                        <linearGradient id="paint1_linear_273_11" x1="0.435059" y1="0.502441" x2="28.4351" y2="24.5024" gradientUnits="userSpaceOnUse">
+                                            <stop stop-color="#26CEE6"/>
+                                            <stop offset="1" stop-color="#B747F2"/>
+                                        </linearGradient>
+                                        </defs>
+                                    </svg>
+                                </span>
+
+                                <span class="track-title">{{ track.title }}</span>
                                 <span class="separator">|</span>
-                                <span class="artist">zxcursed228</span>
+                                <span class="artist">{{ track.author }}</span>
                             </div>
                             <div class="track-right">
                                 <div class="duration" style="display: flex;">
                                     <svg width="13" height="13" viewBox="0 0 13 13" fill="none" xmlns="http://www.w3.org/2000/svg">
                                     <path d="M6.33333 2.83333V6.33333L8.66667 7.5M12.1667 6.33333C12.1667 9.55499 9.55499 12.1667 6.33333 12.1667C3.11167 12.1667 0.5 9.55499 0.5 6.33333C0.5 3.11167 3.11167 0.5 6.33333 0.5C9.55499 0.5 12.1667 3.11167 12.1667 6.33333Z" stroke="#F3F3F3" stroke-opacity="0.5" stroke-linecap="round" stroke-linejoin="round"/>
                                     </svg>
-                                     2:20
+                                     {{ track.duration }}
                                 </div>
                                 <span class="separator">|</span>
                                 <div class="date" style="display: flex;">
                                     <svg width="12" height="13" viewBox="0 0 12 13" fill="none" xmlns="http://www.w3.org/2000/svg">
                                     <path d="M8.08333 0.5V2.83333M3.41667 0.5V2.83333M0.5 5.16667H11M1.66667 1.66667H9.83333C10.4777 1.66667 11 2.189 11 2.83333V11C11 11.6443 10.4777 12.1667 9.83333 12.1667H1.66667C1.02233 12.1667 0.5 11.6443 0.5 11V2.83333C0.5 2.189 1.02233 1.66667 1.66667 1.66667Z" stroke="#F3F3F3" stroke-opacity="0.5" stroke-linecap="round" stroke-linejoin="round"/>
                                     </svg>
-                                    <span> 18/09/2025</span>
+                                    <span> {{ track.date }}</span>
                                 </div>
                                 <span class="separator">|</span>
                                 <div class="likes" style="display: flex;">
                                     <svg width="15" height="14" viewBox="0 0 15 14" fill="none" xmlns="http://www.w3.org/2000/svg">
                                     <path d="M13.3609 1.57455C13.0204 1.23389 12.6161 0.963648 12.1711 0.779273C11.7261 0.594898 11.2492 0.5 10.7675 0.5C10.2859 0.5 9.80893 0.594898 9.36396 0.779273C8.91898 0.963648 8.5147 1.23389 8.17419 1.57455L7.46753 2.28122L6.76086 1.57455C6.07307 0.886756 5.14022 0.500357 4.16753 0.500357C3.19484 0.500357 2.26199 0.886756 1.57419 1.57455C0.886399 2.26235 0.5 3.19519 0.5 4.16788C0.5 5.14057 0.886399 6.07342 1.57419 6.76122L7.46753 12.6545L13.3609 6.76122C13.7015 6.42071 13.9718 6.01643 14.1561 5.57145C14.3405 5.12648 14.4354 4.64954 14.4354 4.16788C14.4354 3.68623 14.3405 3.20929 14.1561 2.76431C13.9718 2.31934 13.7015 1.91505 13.3609 1.57455Z" stroke="#5A5A5A" stroke-linecap="round" stroke-linejoin="round"/>
                                     </svg>
-                                    <span> 254</span>
+                                    <span> {{ track.likesCount }}</span>
                                 </div>
                                 <span class="more" style="font-weight: bold;">···</span>
                             </div>
                         </div>
                     </div>
+
+
+
+
+
+
+
+
                 </div>
             </div>
             <div class="bottom-container-center-content">
@@ -206,13 +342,59 @@ const handlePress = () => {
             </div>
         </div>
     </div>
+    <!-- Уведомление -->
+
+  <div
+    v-if="notification.show"
+    class="notification"
+    :class="`notification--${notification.type}`"
+  >
+    {{ notification.message }}
+  </div>
 </template>
 
 <style scoped>
 *{
     font-family:'Jaldi', sans-serif;
 }
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
 
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.notification {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 24px;
+  border-radius: 8px;
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  background-color: #333;
+  animation: slideIn 0.3s ease-out, fadeOut 0.3s ease-in 2.7s;
+}
+
+.notification--error {
+  background-color: #ff4d4d;
+}
 .filter-box select,
 .sort-box select {
   background: transparent;
