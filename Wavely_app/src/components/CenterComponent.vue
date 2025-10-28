@@ -2,13 +2,15 @@
 import { ref, computed, onMounted } from 'vue'
 import { supabase } from '../lib/supabase.js'
 
-// Твой существующий код...
 const promptText = ref('')
 const isHovered = ref(false)
 const isPressed = ref(false)
 const hasText = computed(() => promptText.value.trim().length > 0)
 const submitPrompt = () => { if (hasText.value) console.log('Промпт отправлен:', promptText.value) }
 const handlePress = () => { if (!hasText.value) return; isPressed.value = true; setTimeout(() => isPressed.value = false, 300) }
+const searchTerm = ref('')
+// Сортировка
+const sortOption = ref('default') // 'default', 'date-new', 'date-old', 'likes-asc', 'likes-desc'
 
 // Supabase данные
 const tracks = ref([])
@@ -145,6 +147,35 @@ const showNotification = (message, type = 'info') => {
     notification.value.show = false
   }, 3000)
 }
+
+const sortedAndFilteredTracks = computed(() => {
+  // 1. Сначала фильтруем по поиску
+  let result = tracks.value
+  if (searchTerm.value.trim()) {
+    const term = searchTerm.value.toLowerCase()
+    result = result.filter(track =>
+      track.title.toLowerCase().includes(term) ||
+      track.author.toLowerCase().includes(term)
+    )
+  }
+
+  // 2. Потом сортируем
+  switch (sortOption.value) {
+    case 'date-new':
+      return result.sort((a, b) => new Date(b.dateCreation) - new Date(a.dateCreation))
+    case 'date-old':
+      return result.sort((a, b) => new Date(a.dateCreation) - new Date(b.dateCreation))
+    case 'likes-asc':
+      return result.sort((a, b) => a.likesCount - b.likesCount)
+    case 'likes-desc':
+      return result.sort((a, b) => b.likesCount - a.likesCount)
+    case 'title':
+      return result.sort((a, b) => a.title.localeCompare(b.title))
+    default:
+      // По умолчанию: новые сверху (как в базе)
+      return result.sort((a, b) => new Date(b.dateCreation) - new Date(a.dateCreation))
+  }
+})
 </script>
 
 <template>
@@ -205,13 +236,19 @@ const showNotification = (message, type = 'info') => {
                 <div class="last-posted" style="padding: 25px 0px 0px 0px;">
                     <!-- Поиск, Фильтр, Сортировка -->
                     <div class="controls-row">
+
+
+
+
                         <div class="search-box">
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 <path d="M19.6 21L13.3 14.7C12.8 15.1 12.225 15.4167 11.575 15.65C10.925 15.8833 10.2333 16 9.5 16C7.68333 16 6.14583 15.3708 4.8875 14.1125C3.62917 12.8542 3 11.3167 3 9.5C3 7.68333 3.62917 6.14583 4.8875 4.8875C6.14583 3.62917 7.68333 3 9.5 3C11.3167 3 12.8542 3.62917 14.1125 4.8875C15.3708 6.14583 16 7.68333 16 9.5C16 10.2333 15.8833 10.925 15.65 11.575C15.4167 12.225 15.1 12.8 14.7 13.3L21 19.6L19.6 21ZM9.5 14C10.75 14 11.8125 13.5625 12.6875 12.6875C13.5625 11.8125 14 10.75 14 9.5C14 8.25 13.5625 7.1875 12.6875 6.3125C11.8125 5.4375 10.75 5 9.5 5C8.25 5 7.1875 5.4375 6.3125 6.3125C5.4375 7.1875 5 8.25 5 9.5C5 10.75 5.4375 11.8125 6.3125 12.6875C7.1875 13.5625 8.25 14 9.5 14Z" fill="#FEFDFF" fill-opacity="0.5"/>
                             </svg>
 
-                            <input type="text" placeholder="Поиск" />
+                            <input v-model="searchTerm" type="text" placeholder="Поиск по названию..." />
                         </div>
+
+
 
                         <div class="filter-box">
                             <svg style="  width: 25px; height: 25px;" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -224,18 +261,21 @@ const showNotification = (message, type = 'info') => {
                             </select>
                         </div>
 
+
+
                         <div class="sort-box">
                             <svg width="36" height="33" viewBox="0 0 36 33" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 <path d="M12 19V5M12 5L5 12M12 5L19 12" stroke="white" stroke-opacity="0.5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                                 <path d="M24 14V28M24 28L17 21M24 28L31 21" stroke="white" stroke-opacity="0.5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
 
-                            <select>
-                                <option>По умолчанию</option>
-                                <option>По дате (новые)</option>
-                                <option>По дате (старые)</option>
-                                <option>По лайкам ↑</option>
-                                <option>По лайкам ↓</option>
+                            <select v-model="sortOption">
+                                <option value="default">По умолчанию</option>
+                                <option value="date-new">По дате (новые)</option>
+                                <option value="date-old">По дате (старые)</option>
+                                <option value="likes-asc">По лайкам ↑</option>
+                                <option value="likes-desc">По лайкам ↓</option>
+                                <option value="title">По названию (A–Z)</option>
                             </select>
                         </div>
                     </div>
@@ -243,10 +283,10 @@ const showNotification = (message, type = 'info') => {
                         <p style="padding: 20px 0px;font-size: 23px;">Каталог композиций</p>
                     </div>
 
-
+                    <!-- Загрузка треков и еще функция лайков -->
                     <div class="track-list">
                         <!-- Заглушка: 4 одинаковых трека -->
-                        <div v-for="(track, index) in tracks" :key="track.id" class="track-item">
+                        <div v-for="(track, index) in sortedAndFilteredTracks" :key="track.id" class="track-item">
                             <div class="track-left">
                                 <!-- Сердце -->
                                 <span @click.stop="toggleLike(index)" class="heart-icon" style="cursor: pointer;">
@@ -298,13 +338,6 @@ const showNotification = (message, type = 'info') => {
                             </div>
                         </div>
                     </div>
-
-
-
-
-
-
-
 
                 </div>
             </div>
