@@ -9,11 +9,13 @@ const router = createRouter({
       path: '/',
       name: 'mainPage',
       component: MainPage,
+      meta: { title: 'Wavely - Главная страница' }
     },
     {
       path: '/profile',
       name: 'profilePage',
-      component: ProfilePage
+      component: ProfilePage,
+      meta: { title: 'Wavely - Профиль' }
     }
   ]
 })
