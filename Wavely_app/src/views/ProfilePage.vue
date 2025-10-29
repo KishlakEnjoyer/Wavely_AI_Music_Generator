@@ -53,11 +53,13 @@ async function loadProfileData() {
     tracks.value = userTracks
     stats.value.totalTracks = userTracks.length
   }
+  console.log(tracks);
+  console.log(stats);
 
   // Загрузка лайкнутых треков (лайки, поставленные текущим пользователем)
   const { data: givenLikes, error: likesError } = await supabase
     .from('likes')
-    .select('track_id')
+    .select('idTrack')
     .eq('authorId', currentUser.id)
 
   if (likesError) {
@@ -67,7 +69,7 @@ async function loadProfileData() {
 
     // Получаем полную информацию о лайкнутых треках
     if (givenLikes.length > 0) {
-      const trackIds = givenLikes.map(like => like.track_id)
+      const trackIds = givenLikes.map(like => like.idTrack)
       const { data: likedTrackDetails, error: detailError } = await supabase
         .from('tracks')
         .select('*')
@@ -83,15 +85,15 @@ async function loadProfileData() {
   }
 
   // Подсчёт полученных лайков (все лайки на треки пользователя)
-  const { data: receivedLikesCount, error: countError } = await supabase
+  const { data, count, error } = await supabase
     .from('likes')
-    .select('*', { count: 'exact', head: true })
-    .in('track_id', userTracks.map(t => t.id))
+    .select('*')
+    .in('idTrack', userTracks.map(t => t.idTrack))
 
-  if (countError) {
-    console.error('Ошибка подсчёта полученных лайков:', countError)
+  if (error) { // Используем 'error', а не 'countError'
+    console.error('Ошибка подсчёта полученных лайков:', error)
   } else {
-    stats.value.receivedLikes = receivedLikesCount?.count || 0
+    stats.value.receivedLikes = count || 0 // Используем 'count', а не 'receivedLikesCount?.count'
   }
 }
 
@@ -148,16 +150,35 @@ const formatDuration = (seconds) => {
       <h2 class="section-title">Ваши мелодии</h2>
       <div v-if="tracks.length > 0" class="tracks-list">
         <div v-for="track in tracks" :key="track.id" class="track-item">
-          <span class="heart-icon">❤️</span>
-          <span class="track-title">{{ track.title }}</span>
-          <span class="separator">|</span>
-          <span class="track-artist">{{ track.artist }}</span>
-          <div class="track-meta">
-            <span class="duration">⏱️ {{ formatDuration(track.duration) }}</span>
+          <div class="track-left">
+            <svg class="heart-logo" width="23" height="23" viewBox="0 0 30 27" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M26.7217 3.1491C26.0407 2.46777 25.2321 1.9273 24.3422 1.55855C23.4522 1.1898 22.4984 1 21.5351 1C20.5717 1 19.6179 1.1898 18.7279 1.55855C17.838 1.9273 17.0294 2.46777 16.3484 3.1491L14.9351 4.56243L13.5217 3.1491C12.1461 1.77351 10.2804 1.00071 8.33505 1.00071C6.38968 1.00071 4.52398 1.77351 3.14839 3.1491C1.7728 4.52469 1 6.39039 1 8.33577C1 10.2811 1.7728 12.1468 3.14839 13.5224L14.9351 25.3091L26.7217 13.5224C27.403 12.8414 27.9435 12.0329 28.3123 11.1429C28.681 10.253 28.8708 9.29908 28.8708 8.33577C28.8708 7.37245 28.681 6.41857 28.3123 5.52863C27.9435 4.63868 27.403 3.83011 26.7217 3.1491Z" stroke="#F3F3F3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="track-title">{{ track.titleTrack }}</span>
             <span class="separator">|</span>
-            <span class="date">📅 {{ formatDate(track.created_at) }}</span>
+            <span class="artist">{{ track.artist }}</span>
+          </div>
+          <div class="track-right">
+            <div class="duration">
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M6.33333 2.83333V6.33333L8.66667 7.5M12.1667 6.33333C12.1667 9.55499 9.55499 12.1667 6.33333 12.1667C3.11167 12.1667 0.5 9.55499 0.5 6.33333C0.5 3.11167 3.11167 0.5 6.33333 0.5C9.55499 0.5 12.1667 3.11167 12.1667 6.33333Z" stroke="#F3F3F3" stroke-opacity="0.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              {{ formatDuration(track.durationTrack) }}
+            </div>
             <span class="separator">|</span>
-            <span class="likes">❤️ {{ track.likes_count || 0 }}</span>
+            <div class="date">
+              <svg width="12" height="13" viewBox="0 0 12 13" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8.08333 0.5V2.83333M3.41667 0.5V2.83333M0.5 5.16667H11M1.66667 1.66667H9.83333C10.4777 1.66667 11 2.189 11 2.83333V11C11 11.6443 10.4777 12.1667 9.83333 12.1667H1.66667C1.02233 12.1667 0.5 11.6443 0.5 11V2.83333C0.5 2.189 1.02233 1.66667 1.66667 1.66667Z" stroke="#F3F3F3" stroke-opacity="0.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              {{ formatDate(track.dateCreation) }}
+            </div>
+            <span class="separator">|</span>
+            <div class="likes">
+              <svg width="15" height="14" viewBox="0 0 15 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M13.3609 1.57455C13.0204 1.23389 12.6161 0.963648 12.1711 0.779273C11.7261 0.594898 11.2492 0.5 10.7675 0.5C10.2859 0.5 9.80893 0.594898 9.36396 0.779273C8.91898 0.963648 8.5147 1.23389 8.17419 1.57455L7.46753 2.28122L6.76086 1.57455C6.07307 0.886756 5.14022 0.500357 4.16753 0.500357C3.19484 0.500357 2.26199 0.886756 1.57419 1.57455C0.886399 2.26235 0.5 3.19519 0.5 4.16788C0.5 5.14057 0.886399 6.07342 1.57419 6.76122L7.46753 12.6545L13.3609 6.76122C13.7015 6.42071 13.9718 6.01643 14.1561 5.57145C14.3405 5.12648 14.4354 4.64954 14.4354 4.16788C14.4354 3.68623 14.3405 3.20929 14.1561 2.76431C13.9718 2.31934 13.7015 1.91505 13.3609 1.57455Z" stroke="#5A5A5A" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              {{ track.likes_count || 0 }}
+            </div>
             <span class="more">...</span>
           </div>
         </div>
@@ -168,16 +189,35 @@ const formatDuration = (seconds) => {
       <h2 class="section-title">Ваши лайкнутые мелодии</h2>
       <div v-if="likedTracks.length > 0" class="tracks-list">
         <div v-for="track in likedTracks" :key="track.id" class="track-item">
-          <span class="heart-icon">💜</span>
-          <span class="track-title">{{ track.title }}</span>
-          <span class="separator">|</span>
-          <span class="track-artist">{{ track.artist }}</span>
-          <div class="track-meta">
-            <span class="duration">⏱️ {{ formatDuration(track.duration) }}</span>
+          <div class="track-left">
+            <svg class="heart-logo" width="23" height="23" viewBox="0 0 30 27" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M26.7217 3.1491C26.0407 2.46777 25.2321 1.9273 24.3422 1.55855C23.4522 1.1898 22.4984 1 21.5351 1C20.5717 1 19.6179 1.1898 18.7279 1.55855C17.838 1.9273 17.0294 2.46777 16.3484 3.1491L14.9351 4.56243L13.5217 3.1491C12.1461 1.77351 10.2804 1.00071 8.33505 1.00071C6.38968 1.00071 4.52398 1.77351 3.14839 3.1491C1.7728 4.52469 1 6.39039 1 8.33577C1 10.2811 1.7728 12.1468 3.14839 13.5224L14.9351 25.3091L26.7217 13.5224C27.403 12.8414 27.9435 12.0329 28.3123 11.1429C28.681 10.253 28.8708 9.29908 28.8708 8.33577C28.8708 7.37245 28.681 6.41857 28.3123 5.52863C27.9435 4.63868 27.403 3.83011 26.7217 3.1491Z" stroke="#F3F3F3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="track-title">{{ track.titleTrack }}</span>
             <span class="separator">|</span>
-            <span class="date">📅 {{ formatDate(track.created_at) }}</span>
+            <span class="artist">{{ track.artist }}</span>
+          </div>
+          <div class="track-right">
+            <div class="duration">
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M6.33333 2.83333V6.33333L8.66667 7.5M12.1667 6.33333C12.1667 9.55499 9.55499 12.1667 6.33333 12.1667C3.11167 12.1667 0.5 9.55499 0.5 6.33333C0.5 3.11167 3.11167 0.5 6.33333 0.5C9.55499 0.5 12.1667 3.11167 12.1667 6.33333Z" stroke="#F3F3F3" stroke-opacity="0.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              {{ formatDuration(track.durationTrack) }}
+            </div>
             <span class="separator">|</span>
-            <span class="likes">❤️ {{ track.likes_count || 0 }}</span>
+            <div class="date">
+              <svg width="12" height="13" viewBox="0 0 12 13" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M8.08333 0.5V2.83333M3.41667 0.5V2.83333M0.5 5.16667H11M1.66667 1.66667H9.83333C10.4777 1.66667 11 2.189 11 2.83333V11C11 11.6443 10.4777 12.1667 9.83333 12.1667H1.66667C1.02233 12.1667 0.5 11.6443 0.5 11V2.83333C0.5 2.189 1.02233 1.66667 1.66667 1.66667Z" stroke="#F3F3F3" stroke-opacity="0.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              {{ formatDate(track.dateCreation) }}
+            </div>
+            <span class="separator">|</span>
+            <div class="likes">
+              <svg width="15" height="14" viewBox="0 0 15 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M13.3609 1.57455C13.0204 1.23389 12.6161 0.963648 12.1711 0.779273C11.7261 0.594898 11.2492 0.5 10.7675 0.5C10.2859 0.5 9.80893 0.594898 9.36396 0.779273C8.91898 0.963648 8.5147 1.23389 8.17419 1.57455L7.46753 2.28122L6.76086 1.57455C6.07307 0.886756 5.14022 0.500357 4.16753 0.500357C3.19484 0.500357 2.26199 0.886756 1.57419 1.57455C0.886399 2.26235 0.5 3.19519 0.5 4.16788C0.5 5.14057 0.886399 6.07342 1.57419 6.76122L7.46753 12.6545L13.3609 6.76122C13.7015 6.42071 13.9718 6.01643 14.1561 5.57145C14.3405 5.12648 14.4354 4.64954 14.4354 4.16788C14.4354 3.68623 14.3405 3.20929 14.1561 2.76431C13.9718 2.31934 13.7015 1.91505 13.3609 1.57455Z" stroke="#5A5A5A" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              {{ track.likes_count || 0 }}
+            </div>
             <span class="more">...</span>
           </div>
         </div>
@@ -360,6 +400,7 @@ const formatDuration = (seconds) => {
   padding: 18px 24px;
   border-radius: 8px;
   display: flex;
+  justify-content: space-between; /* Изменено с align-items */
   align-items: center;
   gap: 14px;
   font-size: 16px;
@@ -370,30 +411,63 @@ const formatDuration = (seconds) => {
   background-color: #252525;
 }
 
-.track-item .heart-icon {
-  font-size: 22px;
+.track-left {
+  display: flex;
+  align-items: center;
+  gap: 10px; /* Увеличен отступ */
+  flex-grow: 1; /* Занимает всё доступное пространство слева */
+  overflow: hidden; /* Скрывает переполняющий текст */
+}
+
+.track-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-size: 14px;
+  color: #ccc;
+  flex-shrink: 0; /* Не сжимается */
+}
+
+.heart-logo {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
 }
 
 .track-title {
-  font-weight: 600;
-  flex-grow: 1;
+  font-weight: bold;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.artist {
+  color: #aaa;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .separator {
-  margin: 0 12px;
-  color: #aaa;
-  font-size: 14px;
+  margin: 0 8px;
+  color: #a5a5a5;
 }
 
-.track-meta {
+.duration, .date, .likes {
   display: flex;
   align-items: center;
-  gap: 14px;
-  font-size: 14px;
-  color: #ccc;
+  gap: 4px;
+}
+
+.more {
+  cursor: pointer;
+  opacity: 0.7;
+  margin-left: 8px; /* Отступ слева от лайков */
+}
+
+.more:hover {
+  opacity: 1;
+  text-decoration: underline;
 }
 
 .empty-state {
@@ -402,16 +476,5 @@ const formatDuration = (seconds) => {
   padding: 30px 0;
   font-style: italic;
   font-size: 16px;
-}
-
-.more {
-  cursor: pointer;
-  opacity: 0.7;
-  font-size: 14px;
-}
-
-.more:hover {
-  opacity: 1;
-  text-decoration: underline;
 }
 </style>
