@@ -1,8 +1,6 @@
 <script setup>
-import { ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
-
-const router = useRouter()
+import { ref, computed, onMounted } from 'vue'
+import { supabase } from '../lib/supabase.js'
 
 const promptText = ref('')
 const isHovered = ref(false)
@@ -14,9 +12,132 @@ const searchTerm = ref('')
 // Сортировка
 const sortOption = ref('default') // 'default', 'date-new', 'date-old', 'likes-asc', 'likes-desc'
 
-submitPrompt = () => {
-  if (hasText.value) {
-    router.push({ name: 'promptPage' })
+// Supabase данные
+const tracks = ref([])
+const loading = ref(true)
+const error = ref(null)
+const user = ref(null)
+
+// Уведомление
+const notification = ref({
+  show: false,
+  message: '',
+  type: 'info'
+})
+
+const formatDuration = (seconds) => {
+  if (!seconds) return '0:00'
+  const mins = Math.floor(seconds / 60)
+  const secs = seconds % 60
+  return `${mins}:${secs.toString().padStart(2, '0')}`
+}
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return ''
+  const d = new Date(dateStr)
+  return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()}`
+}
+
+onMounted(async () => {
+  const { data: { user: currentUser } } = await supabase.auth.getUser()
+  user.value = currentUser
+
+  try {
+    const { data, error: err } = await supabase
+      .from('tracks')
+      .select('idTrack, titleTrack, durationTrack, dateCreation, authorId, publicTrack')
+      .eq('publicTrack', true)
+      .order('dateCreation', { ascending: false })
+
+    if (err) throw err
+
+    const trackIds = data.map(t => t.idTrack)
+    let likesMap = {}
+    const userLikes = {}
+
+    if (trackIds.length > 0) {
+      // Загружаем ВСЕ лайки для этих треков
+      const { data: likesData, error: likesErr } = await supabase
+        .from('likes')
+        .select('idTrack')
+        .in('idTrack', trackIds)
+
+      if (likesErr) {
+        console.error('Ошибка загрузки лайков:', likesErr)
+      } else if (likesData && Array.isArray(likesData)) {
+        likesMap = likesData.reduce((acc, like) => {
+          acc[like.idTrack] = (acc[like.idTrack] || 0) + 1 // ✅ Исправлено: idTrack
+          return acc
+        }, {})
+      }
+
+      // Загружаем лайки ТЕКУЩЕГО пользователя
+      if (user.value) {
+        const { data: userLikesData, error: userLikesErr } = await supabase
+          .from('likes')
+          .select('idTrack')
+          .eq('authorId', user.value.id)
+          .in('idTrack', trackIds)
+
+        if (userLikesErr) {
+          console.error('Ошибка загрузки моих лайков:', userLikesErr)
+        } else if (userLikesData && Array.isArray(userLikesData)) {
+          userLikesData.forEach(like => {
+            userLikes[like.idTrack] = true // ✅ Исправлено: idTrack
+          })
+        }
+      }
+    }
+
+    tracks.value = data.map(track => ({
+      id: track.idTrack,
+      title: track.titleTrack,
+      author: track.authorId?.substring(0, 8) || 'Аноним',
+      duration: formatDuration(track.durationTrack),
+      date: formatDate(track.dateCreation),
+      likesCount: likesMap[track.idTrack] || 0,
+      isLikedByUser: !!userLikes[track.idTrack]
+    }))
+
+  } catch (e) {
+    error.value = e.message
+    console.error('Ошибка загрузки треков:', e)
+  } finally {
+    loading.value = false
+  }
+})
+
+const toggleLike = async (index) => {
+  if (!user.value) {
+    showNotification('Пожалуйста, войдите в аккаунт, чтобы ставить лайки', 'info')
+    return
+  }
+
+  const track = tracks.value[index]
+  const isNowLiked = !track.isLikedByUser
+
+  try {
+    if (isNowLiked) {
+      await supabase.from('likes').insert({
+        idTrack: track.id,
+        authorId: user.value.id
+      })
+      tracks.value[index].likesCount += 1
+    } else {
+      await supabase
+        .from('likes')
+        .delete()
+        .match({ idTrack: track.id, authorId: user.value.id })
+      tracks.value[index].likesCount -= 1
+    }
+
+    tracks.value[index].isLikedByUser = isNowLiked
+    // Опционально: показать уведомление об успехе
+    // showNotification(isNowLiked ? 'Лайк добавлен!' : 'Лайк убран', 'success')
+
+  } catch (e) {
+    console.error('Ошибка при лайке:', e)
+    showNotification('Не удалось обновить лайк', 'error') // ✅ Исправлено: было alert
   }
 }
 
