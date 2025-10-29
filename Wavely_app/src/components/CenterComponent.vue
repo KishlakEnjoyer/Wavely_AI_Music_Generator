@@ -16,28 +16,117 @@ const showAuthModal = ref(false)
 const generatedTrackUrl = ref(null)
 const generatedTrackBlob = ref(null)
 
-// Modal refs
+const moods = ref([])
+const instruments = ref([])
+const genres = ref([])
+
+const selectedMood = ref('')
+const selectedInstrument = ref('')
+const selectedGenre = ref('')
+
 const authModal = ref(null)
 const registerModal = ref(null)
 
-const hasText = computed(() => promptText.value.trim().length > 0)
+const hasText = computed(() => {
+  return promptText.value.trim().length > 0 || 
+         selectedMood.value || 
+         selectedInstrument.value || 
+         selectedGenre.value
+})
 const isAuthenticated = computed(() => user.value !== null)
 
-// Проверяем авторизацию при загрузке компонента
+const finalPrompt = computed(() => {
+  let prompt = promptText.value.trim()
+  
+  const selectedParams = []
+  
+  if (selectedMood.value) {
+    selectedParams.push(`mood: ${selectedMood.value}`)
+  }
+  
+  if (selectedInstrument.value) {
+    selectedParams.push(`instrument: ${selectedInstrument.value}`)
+  }
+  
+  if (selectedGenre.value) {
+    selectedParams.push(`genre: ${selectedGenre.value}`)
+  }
+  
+  if (selectedParams.length > 0) {
+    const paramsString = selectedParams.join(', ')
+    if (prompt) {
+      prompt = `${prompt} (${paramsString})`
+    } else {
+      prompt = `Create music with parameters: ${paramsString}`
+    }
+  }
+  
+  return prompt
+})
+
+const loadMoods = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('moods')
+      .select('*')
+      .order('nameMood')
+    
+    if (error) throw error
+    moods.value = data || []
+  } catch (error) {
+    console.error('Ошибка загрузки настроений:', error)
+    moods.value = []
+  }
+}
+
+const loadInstruments = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('instruments')
+      .select('*')
+      .order('nameInstrument')
+    
+    if (error) throw error
+    instruments.value = data || []
+  } catch (error) {
+    console.error('Ошибка загрузки инструментов:', error)
+    instruments.value = []
+  }
+}
+
+const loadGenres = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('genres')
+      .select('*')
+      .order('nameGenre')
+    
+    if (error) throw error
+    genres.value = data || []
+  } catch (error) {
+    console.error('Ошибка загрузки жанров:', error)
+    genres.value = []
+  }
+}
+
 onMounted(async () => {
   const { data: { session } } = await supabase.auth.getSession()
   user.value = session?.user || null
 
-  // Слушаем изменения авторизации
   supabase.auth.onAuthStateChange((event, session) => {
     user.value = session?.user || null
   })
+
+  await Promise.all([
+    loadMoods(),
+    loadInstruments(),
+    loadGenres()
+  ])
 })
 
 const submitPrompt = async () => {
   if (!hasText.value || isGenerating.value) return
   
-  // Проверяем авторизацию
   if (!isAuthenticated.value) {
     authModal.value.open()
     return
@@ -47,12 +136,10 @@ const submitPrompt = async () => {
     isGenerating.value = true
     generationStatus.value = 'Отправляем запрос на генерацию...'
     
-    // Отправляем запрос на генерацию (15 секунд, wav формат)
-    const response = await musicApi.generateMusic(promptText.value.trim(), 15, 'wav')
+    const response = await musicApi.generateMusic(finalPrompt.value, 15, 'wav')
     currentJobId.value = response.job_id
     generationStatus.value = 'Генерация начата, ожидаем завершения...'
     
-    // Отслеживаем статус генерации
     await musicApi.pollUntilComplete(
       response.job_id,
       (status) => {
@@ -69,44 +156,133 @@ const submitPrompt = async () => {
     
     generationStatus.value = 'Генерация завершена! Скачиваем файл...'
     
-    // Скачиваем готовый файл
     const audioBlob = await musicApi.downloadFile(response.job_id)
     
-    // Создаем URL для воспроизведения
     const audioUrl = URL.createObjectURL(audioBlob)
     generatedTrackUrl.value = audioUrl
     generatedTrackBlob.value = audioBlob
     
-    // Сохраняем трек в базу данных
-    await saveTrackToDatabase(promptText.value.trim(), audioUrl, audioBlob)
+    generationStatus.value = 'Сохраняем трек в базу данных...'
     
-    generationStatus.value = 'Готово! Трек сохранен.'
+    try {
+      const savedTrack = await saveTrackToDatabase(promptText.value.trim(), audioUrl, audioBlob)
+      generationStatus.value = 'Готово! Трек успешно сохранен.'
+      console.log('Трек сохранен с ID:', savedTrack?.idTrack)
+    } catch (saveError) {
+      console.error('Ошибка сохранения трека:', saveError)
+      generationStatus.value = 'Музыка сгенерирована, но возникла ошибка при сохранении в базу данных.'
+    }
     
-    // Очищаем форму
     promptText.value = ''
+    selectedMood.value = ''
+    selectedInstrument.value = ''
+    selectedGenre.value = ''
     
-    // Показываем успешное завершение
     setTimeout(() => {
       isGenerating.value = false
-      // НЕ очищаем generationStatus и аудиоплеер, чтобы пользователь мог прослушать трек
       currentJobId.value = null
-    }, 1000)
+    }, 2000)
     
   } catch (error) {
     console.error('Ошибка генерации:', error)
-    generationStatus.value = `Ошибка: ${error.message}`
+    
+    if (error.message.includes('authentication') || error.message.includes('auth')) {
+      generationStatus.value = 'Ошибка: Необходимо войти в систему'
+    } else if (error.message.includes('network') || error.message.includes('fetch')) {
+      generationStatus.value = 'Ошибка сети: Проверьте подключение к интернету'
+    } else {
+      generationStatus.value = `Ошибка генерации: ${error.message}`
+    }
     
     setTimeout(() => {
       isGenerating.value = false
       generationStatus.value = ''
       currentJobId.value = null
-    }, 3000)
+    }, 5000)
+  }
+}
+
+// Вспомогательные функции для получения ID из базы данных
+const getMoodIdByName = async (moodName) => {
+  if (!moodName) return null
+  
+  const { data, error } = await supabase
+    .from('moods')
+    .select('idMood')
+    .eq('nameMood', moodName)
+    .single()
+  
+  if (error) {
+    console.error('Ошибка получения ID настроения:', error)
+    return null
+  }
+  
+  return data?.idMood || null
+}
+
+const getGenreIdByName = async (genreName) => {
+  if (!genreName) return null
+  
+  const { data, error } = await supabase
+    .from('genres')
+    .select('idGenre')
+    .eq('nameGenre', genreName)
+    .single()
+  
+  if (error) {
+    console.error('Ошибка получения ID жанра:', error)
+    return null
+  }
+  
+  return data?.idGenre || null
+}
+
+const getInstrumentIdByName = async (instrumentName) => {
+  if (!instrumentName) return null
+  
+  const { data, error } = await supabase
+    .from('instruments')
+    .select('idInstrument')
+    .eq('nameInstrument', instrumentName)
+    .single()
+  
+  if (error) {
+    console.error('Ошибка получения ID инструмента:', error)
+    return null
+  }
+  
+  return data?.idInstrument || null
+}
+
+// Функция для сохранения связи трек-инструмент
+const saveTrackInstrumentRelation = async (trackId, instrumentId) => {
+  try {
+    const { data, error } = await supabase
+      .from('track_instrument')
+      .insert({
+        idTrack: trackId,
+        idInstrument: instrumentId
+      })
+      .select()
+
+    if (error) throw error
+    
+    console.log('Связь трек-инструмент сохранена:', data)
+    return data
+  } catch (error) {
+    console.error('Ошибка сохранения связи трек-инструмент:', error)
+    throw error
   }
 }
 
 const saveTrackToDatabase = async (prompt, audioUrl, audioBlob) => {
   try {
-    // Загружаем аудиофайл в Supabase Storage
+    // Получаем ID для выбранных параметров
+    const moodId = await getMoodIdByName(selectedMood.value)
+    const genreId = await getGenreIdByName(selectedGenre.value)
+    const instrumentId = await getInstrumentIdByName(selectedInstrument.value)
+
+    // Загружаем файл в Storage
     const fileName = `track_${Date.now()}_${user.value.id}.wav`
     const { data: uploadData, error: uploadError } = await supabase.storage
       .from('tracks')
@@ -116,33 +292,38 @@ const saveTrackToDatabase = async (prompt, audioUrl, audioBlob) => {
 
     if (uploadError) throw uploadError
 
-    // Получаем публичный URL файла
     const { data: { publicUrl } } = supabase.storage
       .from('tracks')
       .getPublicUrl(fileName)
 
-    // Сохраняем информацию о треке в базу данных
-    const { data, error } = await supabase
+    // Сохраняем трек в базу данных
+    const { data: trackData, error: trackError } = await supabase
       .from('tracks')
       .insert({
-        titleTrack: prompt.substring(0, 100), // Ограничиваем длину заголовка
+        titleTrack: prompt.substring(0, 100), 
         pathToFile: publicUrl,
-        idGenre: 1, // Пока ставим дефолтный жанр
-        idMood: 1, // Пока ставим дефолтное настроение
-        tempoTrack: null, // Можно будет добавить анализ темпа позже
-        durationTrack: 15, // 15 секунд как указано в требованиях
+        idGenre: genreId || 1, // Используем полученный ID или значение по умолчанию
+        idMood: moodId || 1,   // Используем полученный ID или значение по умолчанию
+        tempoTrack: null,
+        durationTrack: 15, 
         dateCreation: new Date().toISOString().split('T')[0],
         publicTrack: true,
         authorId: user.value.id
       })
       .select()
 
-    if (error) throw error
+    if (trackError) throw trackError
     
-    console.log('Трек успешно сохранен:', data)
+    // Сохраняем связь трек-инструмент, если инструмент выбран
+    if (instrumentId && trackData && trackData[0]) {
+      await saveTrackInstrumentRelation(trackData[0].idTrack, instrumentId)
+    }
+    
+    console.log('Трек успешно сохранен:', trackData)
+    return trackData[0]
   } catch (error) {
     console.error('Ошибка сохранения трека:', error)
-    // Не прерываем процесс, просто логируем ошибку
+    throw error
   }
 }
 
@@ -154,7 +335,6 @@ const handlePress = () => {
   }, 300)
 }
 
-// Authentication handlers
 const openAuthModal = () => authModal.value.open()
 const openRegisterModal = () => registerModal.value.open()
 
@@ -178,7 +358,6 @@ const onRegister = (data) => {
   console.log('Регистрация успешна:', data)
 }
 
-// Функция скачивания трека
 const downloadTrack = () => {
   if (!generatedTrackBlob.value) return
   
@@ -231,6 +410,41 @@ const downloadTrack = () => {
                         <div v-else class="loading-spinner"></div>
                         <div class="overlay"></div>
                     </button>
+                </div>
+
+                <!-- Выпадающие списки -->
+                <div class="dropdowns-container">
+                    <div class="dropdown-group">
+                        <select id="mood-select" v-model="selectedMood" class="dropdown-select">
+                            <option value="">Выберите настроение</option>
+                            <option v-for="mood in moods" :key="mood.id" :value="mood.nameMood">
+                                {{ mood.nameMood }}
+                            </option>
+                        </select>
+                    </div>
+                    
+                    <div class="dropdown-group">
+                        <select id="instrument-select" v-model="selectedInstrument" class="dropdown-select">
+                            <option value="">Выберите инструмент</option>
+                            <option v-for="instrument in instruments" :key="instrument.id" :value="instrument.nameInstrument">
+                                {{ instrument.nameInstrument }}
+                            </option>
+                        </select>
+                    </div>
+                    
+                    <div class="dropdown-group">
+                        <select id="genre-select" v-model="selectedGenre" class="dropdown-select">
+                            <option value="">Выберите жанр</option>
+                            <option v-for="genre in genres" :key="genre.id" :value="genre.nameGenre">
+                                {{ genre.nameGenre }}
+                            </option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Превью финального промпта -->
+                <div v-if="finalPrompt && finalPrompt !== promptText.trim()" class="prompt-preview">
+                    <small>Итоговый промпт: "{{ finalPrompt }}"</small>
                 </div>
             </form>
             
@@ -608,5 +822,76 @@ p {
 .submit-button:not(.active) {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+/* Стили для выпадающих списков */
+.dropdowns-container {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.dropdown-group {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 150px;
+}
+
+.dropdown-select {
+    padding: 10px 15px;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 15px;
+    background: rgba(255, 255, 255, 0.05);
+    color: white;
+    font-size: 14px;
+    outline: none;
+    transition: all 0.3s ease;
+    cursor: pointer;
+}
+
+.dropdown-select:focus {
+    border-color: #31CEF4;
+    box-shadow: 0 0 10px rgba(49, 206, 244, 0.3);
+}
+
+.dropdown-select:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.dropdown-select option {
+    background: #1a1a1a;
+    color: white;
+    padding: 10px;
+}
+
+@media (max-width: 768px) {
+    .dropdowns-container {
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    .dropdown-group {
+        width: 100%;
+        max-width: 300px;
+    }
+}
+
+/* Стили для превью промпта */
+.prompt-preview {
+    margin-bottom: 15px;
+    padding: 10px 15px;
+    background: rgba(49, 206, 244, 0.1);
+    border: 1px solid rgba(49, 206, 244, 0.3);
+    border-radius: 10px;
+    text-align: center;
+}
+
+.prompt-preview small {
+    color: #31CEF4;
+    font-size: 12px;
+    font-style: italic;
 }
 </style>
