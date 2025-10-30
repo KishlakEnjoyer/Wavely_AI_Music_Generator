@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { supabase } from '../lib/supabase.js'
+import { RouterLink } from 'vue-router'
 
 const promptText = ref('')
 const isHovered = ref(false)
@@ -49,7 +50,7 @@ onMounted(async () => {
   try {
     const { data, error: err } = await supabase
       .from('tracks')
-      .select('idTrack, titleTrack, durationTrack, dateCreation, authorId, publicTrack, idGenre')
+      .select('idTrack, titleTrack, durationTrack, dateCreation, authorId, publicTrack, profiles!inner(nickname)')
       .eq('publicTrack', true)
       .order('dateCreation', { ascending: false })
 
@@ -97,6 +98,7 @@ onMounted(async () => {
       id: track.idTrack,
       title: track.titleTrack,
       author: track.authorId?.substring(0, 8) || 'Аноним',
+      authorNick: track.profiles.nickname,
       duration: formatDuration(track.durationTrack),
       date: formatDate(track.dateCreation), //дата для отображения
       dateObj: new Date(track.dateCreation), //дата для сортировки
@@ -342,7 +344,7 @@ const sortedAndFilteredTracks = computed(() => {
 
                                 <span class="track-title">{{ track.title }}</span>
                                 <span class="separator">|</span>
-                                <span class="artist">{{ track.author }}</span>
+                                <RouterLink class="artist">{{ track.authorNick }}</RouterLink>
                             </div>
                             <div class="track-right">
                                 <div class="duration" style="display: flex;">
@@ -518,6 +520,8 @@ const sortedAndFilteredTracks = computed(() => {
 /* Стиль для сердечка */
 .heart-icon {
   font-size: 18px;
+  display: flex;
+  align-items: center;
 }
 
 .track-right {
@@ -534,7 +538,7 @@ const sortedAndFilteredTracks = computed(() => {
 .more {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
 }
 
 .track-left {
