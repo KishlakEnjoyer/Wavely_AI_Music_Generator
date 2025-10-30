@@ -173,7 +173,7 @@ const showNotification = (message, type = 'info') => {
 }
 
 const sortedAndFilteredTracks = computed(() => {
-  // Сначала фильтр по поиску
+  // Поиску
   let result = tracks.value
   if (searchTerm.value.trim()) {
     const term = searchTerm.value.toLowerCase()
@@ -183,12 +183,12 @@ const sortedAndFilteredTracks = computed(() => {
     )
   }
 
-  // 🎛️ Фильтр по жанру
+  // Фильтр по жанру
   if (selectedGenre.value !== 'all') {
     result = result.filter(track => track.genreId == selectedGenre.value)
   }
 
-  // Потом сортировка
+  // Сортировка
   switch (sortOption.value) {
     case 'date-new':
       return result.sort((a, b) => b.dateObj - a.dateObj)
@@ -280,11 +280,11 @@ const sortedAndFilteredTracks = computed(() => {
 
 
                         <div class="filter-box">
-                            <svg style="  width: 25px; height: 25px;" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <svg style="width: 22px; height: 22px;" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 <path d="M22 3H2L10 12.46V19L14 21V12.46L22 3Z" stroke="white" stroke-opacity="0.5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
-
-                            <select v-model="selectedGenre">
+                            
+                            <select class="selected" style="background-color: #1e1e1e;" v-model="selectedGenre">
                               <option v-for="genre in genres" :key="genre.idGenre" :value="genre.idGenre">
                                 {{ genre.nameGenre }}
                               </option>
@@ -299,7 +299,7 @@ const sortedAndFilteredTracks = computed(() => {
                                 <path d="M24 14V28M24 28L17 21M24 28L31 21" stroke="white" stroke-opacity="0.5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
 
-                            <select v-model="sortOption">
+                            <select style="background-color: #1e1e1e;" v-model="sortOption">
                                 <option value="default">По умолчанию</option>
                                 <option value="date-new">По дате (новые)</option>
                                 <option value="date-old">По дате (старые)</option>
@@ -421,7 +421,6 @@ const sortedAndFilteredTracks = computed(() => {
 *{
     font-family:'Jaldi', sans-serif;
 }
-
 @keyframes slideIn {
   from {
     opacity: 0;
