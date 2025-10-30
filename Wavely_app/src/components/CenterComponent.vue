@@ -9,9 +9,13 @@ const isPressed = ref(false)
 const hasText = computed(() => promptText.value.trim().length > 0)
 const submitPrompt = () => { if (hasText.value) console.log('Промпт отправлен:', promptText.value) }
 const handlePress = () => { if (!hasText.value) return; isPressed.value = true; setTimeout(() => isPressed.value = false, 300) }
+// Поиск
 const searchTerm = ref('')
 // Сортировка
 const sortOption = ref('default') // 'default', 'date-new', 'date-old', 'likes-asc', 'likes-desc'
+// жанр
+const genres = ref([])
+const selectedGenre = ref('all')
 
 // Supabase данные
 const tracks = ref([])
@@ -57,7 +61,7 @@ onMounted(async () => {
     const userLikes = {}
 
     if (trackIds.length > 0) {
-      // Загружаем ВСЕ лайки для этих треков
+      // Загрузка всех лайков для треков
       const { data: likesData, error: likesErr } = await supabase
         .from('likes')
         .select('idTrack')
@@ -67,12 +71,12 @@ onMounted(async () => {
         console.error('Ошибка загрузки лайков:', likesErr)
       } else if (likesData && Array.isArray(likesData)) {
         likesMap = likesData.reduce((acc, like) => {
-          acc[like.idTrack] = (acc[like.idTrack] || 0) + 1 // ✅ Исправлено: idTrack
+          acc[like.idTrack] = (acc[like.idTrack] || 0) + 1 
           return acc
         }, {})
       }
 
-      // Загружаем лайки ТЕКУЩЕГО пользователя
+      // Загрузка лайков текущего пользователя
       if (user.value) {
         const { data: userLikesData, error: userLikesErr } = await supabase
           .from('likes')
@@ -84,21 +88,24 @@ onMounted(async () => {
           console.error('Ошибка загрузки моих лайков:', userLikesErr)
         } else if (userLikesData && Array.isArray(userLikesData)) {
           userLikesData.forEach(like => {
-            userLikes[like.idTrack] = true // ✅ Исправлено: idTrack
+            userLikes[like.idTrack] = true 
           })
         }
       }
     }
 
-    tracks.value = data.map(track => ({
+    tracks.value = data.map((track, idx) => ({
       id: track.idTrack,
       title: track.titleTrack,
       author: track.authorId?.substring(0, 8) || 'Аноним',
       authorNick: track.profiles.nickname,
       duration: formatDuration(track.durationTrack),
-      date: formatDate(track.dateCreation),
+      date: formatDate(track.dateCreation), //дата для отображения
+      dateObj: new Date(track.dateCreation), //дата для сортировки
       likesCount: likesMap[track.idTrack] || 0,
-      isLikedByUser: !!userLikes[track.idTrack]
+      isLikedByUser: !!userLikes[track.idTrack],
+      originalIndex: idx,
+      genreId: track.idGenre
     }))
 
   } catch (e) {
@@ -107,6 +114,23 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+
+  // Загружаем жанры
+  try {
+    const { data: genresData, error: genresErr } = await supabase
+      .from('genres')
+      .select('idGenre, nameGenre')
+      .order('nameGenre', { ascending: true })
+
+    if (genresErr) {
+      console.error('Ошибка загрузки жанров:', genresErr)
+    } else {
+      genres.value = [{ idGenre: 'all', nameGenre: 'Все жанры' }, ...(genresData || [])]
+    }
+  } catch (e) {
+    console.error('Ошибка при загрузке жанров:', e)
+  }
+
 })
 
 const toggleLike = async (index) => {
@@ -139,7 +163,7 @@ const toggleLike = async (index) => {
 
   } catch (e) {
     console.error('Ошибка при лайке:', e)
-    showNotification('Не удалось обновить лайк', 'error') // ✅ Исправлено: было alert
+    showNotification('Не удалось обновить лайк', 'error')
   }
 }
 
@@ -151,7 +175,7 @@ const showNotification = (message, type = 'info') => {
 }
 
 const sortedAndFilteredTracks = computed(() => {
-  // 1. Сначала фильтруем по поиску
+  // Поиску
   let result = tracks.value
   if (searchTerm.value.trim()) {
     const term = searchTerm.value.toLowerCase()
@@ -161,21 +185,27 @@ const sortedAndFilteredTracks = computed(() => {
     )
   }
 
-  // 2. Потом сортируем
+  // Фильтр по жанру
+  if (selectedGenre.value !== 'all') {
+    result = result.filter(track => track.genreId == selectedGenre.value)
+  }
+
+  // Сортировка
   switch (sortOption.value) {
     case 'date-new':
-      return result.sort((a, b) => new Date(b.dateCreation) - new Date(a.dateCreation))
+      return result.sort((a, b) => b.dateObj - a.dateObj)
     case 'date-old':
-      return result.sort((a, b) => new Date(a.dateCreation) - new Date(b.dateCreation))
+      return result.sort((a, b) => a.dateObj - b.dateObj)
     case 'likes-asc':
       return result.sort((a, b) => a.likesCount - b.likesCount)
     case 'likes-desc':
       return result.sort((a, b) => b.likesCount - a.likesCount)
-    case 'title':
+    case 'titleAZ':
       return result.sort((a, b) => a.title.localeCompare(b.title))
+    case 'titleZA':
+      return result.sort((a, b) => b.title.localeCompare(a.title))
     default:
-      // По умолчанию: новые сверху (как в базе)
-      return result.sort((a, b) => new Date(b.dateCreation) - new Date(a.dateCreation))
+      return result.sort((a, b) => a.originalIndex - b.originalIndex)
   }
 })
 </script>
@@ -238,8 +268,7 @@ const sortedAndFilteredTracks = computed(() => {
                 <div class="last-posted" style="padding: 25px 0px 0px 0px;">
                     <!-- Поиск, Фильтр, Сортировка -->
                     <div class="controls-row">
-
-
+                      
 
 
                         <div class="search-box">
@@ -253,13 +282,14 @@ const sortedAndFilteredTracks = computed(() => {
 
 
                         <div class="filter-box">
-                            <svg style="  width: 25px; height: 25px;" width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <svg style="width: 22px; height: 22px;" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                 <path d="M22 3H2L10 12.46V19L14 21V12.46L22 3Z" stroke="white" stroke-opacity="0.5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
-
-                            <select>
-                                <option>По умолчанию</option>
-                                <option>По жанру</option>
+                            
+                            <select class="selected" style="background-color: #1e1e1e;" v-model="selectedGenre">
+                              <option v-for="genre in genres" :key="genre.idGenre" :value="genre.idGenre">
+                                {{ genre.nameGenre }}
+                              </option>
                             </select>
                         </div>
 
@@ -271,13 +301,14 @@ const sortedAndFilteredTracks = computed(() => {
                                 <path d="M24 14V28M24 28L17 21M24 28L31 21" stroke="white" stroke-opacity="0.5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                             </svg>
 
-                            <select v-model="sortOption">
+                            <select style="background-color: #1e1e1e;" v-model="sortOption">
                                 <option value="default">По умолчанию</option>
                                 <option value="date-new">По дате (новые)</option>
                                 <option value="date-old">По дате (старые)</option>
                                 <option value="likes-asc">По лайкам ↑</option>
                                 <option value="likes-desc">По лайкам ↓</option>
-                                <option value="title">По названию (A–Z)</option>
+                                <option value="titleAZ">По названию (А–Я)</option>
+                                <option value="titleZA">По названию (Я–А)</option>
                             </select>
                         </div>
                     </div>
@@ -483,10 +514,10 @@ const sortedAndFilteredTracks = computed(() => {
 .controls-row {
   display: flex;
   margin-bottom: 20px;
-  gap: 12px; /* одинаковый отступ между элементами */
+  gap: 12px; /* отступ между элементами */
   width: 100%;
 }
-/* Стиль для сердечка — можно заменить на SVG или иконку */
+/* Стиль для сердечка */
 .heart-icon {
   font-size: 18px;
   display: flex;
