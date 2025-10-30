@@ -50,7 +50,7 @@ onMounted(async () => {
   try {
     const { data, error: err } = await supabase
       .from('tracks')
-      .select('idTrack, titleTrack, durationTrack, dateCreation, authorId, publicTrack, profiles!inner(nickname)')
+      .select('idTrack, titleTrack, durationTrack, dateCreation, idGenre, authorId, publicTrack, profiles!inner(nickname)')
       .eq('publicTrack', true)
       .order('dateCreation', { ascending: false })
 
@@ -97,7 +97,7 @@ onMounted(async () => {
     tracks.value = data.map((track, idx) => ({
       id: track.idTrack,
       title: track.titleTrack,
-      author: track.authorId?.substring(0, 8) || 'Аноним',
+      author: track.authorId || 'Аноним',
       authorNick: track.profiles.nickname,
       duration: formatDuration(track.durationTrack),
       date: formatDate(track.dateCreation), //дата для отображения
@@ -319,7 +319,7 @@ const sortedAndFilteredTracks = computed(() => {
                     <!-- Загрузка треков и еще функция лайков -->
                     <div class="track-list">
                         <!-- Заглушка: 4 одинаковых трека -->
-                        <div v-for="(track, index) in sortedAndFilteredTracks" :key="track.id" class="track-item">
+                        <div v-for="(track, index) in sortedAndFilteredTracks.slice(0, 8)" :key="track.id" class="track-item">
                             <div class="track-left">
                                 <!-- Сердце -->
                                 <span @click.stop="toggleLike(index)" class="heart-icon" style="cursor: pointer;">
@@ -344,7 +344,7 @@ const sortedAndFilteredTracks = computed(() => {
 
                                 <span class="track-title">{{ track.title }}</span>
                                 <span class="separator">|</span>
-                                <RouterLink class="artist">{{ track.authorNick }}</RouterLink>
+                                <RouterLink :to="`/user/${track.author}`" class="artist">{{ track.authorNick }}</RouterLink>            
                             </div>
                             <div class="track-right">
                                 <div class="duration" style="display: flex;">
