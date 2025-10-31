@@ -713,6 +713,7 @@ const instrumentsForSelect = computed(() => {
               :track="track"
               :show-artist-link="true"
               :show-more="true"
+              :show-three-dots="false" 
               @like="() => toggleLike(track.id)"
             />
           </div>

@@ -1,4 +1,86 @@
 <!-- src/components/MelodyElement.vue -->
+
+<script setup>
+import { defineProps, defineEmits, ref, onMounted, onUnmounted } from "vue";
+import { supabase } from "@/lib/supabase";
+
+const props = defineProps({
+  track: {
+    type: Object,
+    required: true,
+    // Ожидаем, что track будет содержать publicTrack
+  },
+  showArtistLink: {
+    type: Boolean,
+    default: true,
+  },
+  showMore: {
+    type: Boolean,
+    default: false,
+  },
+  // Новый пропс: показывать ли три точки
+  showThreeDots: {
+    type: Boolean,
+    default: false,
+  },
+});
+
+const emit = defineEmits(["like", "public-status-changed"]);
+
+const isContextMenuOpen = ref(false);
+const moreButtonRef = ref(null);
+const contextMenuRef = ref(null);
+
+// Функция для закрытия меню при клике вне его
+const closeContextMenu = (event) => {
+  if (
+    isContextMenuOpen.value &&
+    moreButtonRef.value &&
+    !moreButtonRef.value.contains(event.target) &&
+    contextMenuRef.value &&
+    !contextMenuRef.value.contains(event.target)
+  ) {
+    isContextMenuOpen.value = false;
+  }
+};
+
+const toggleContextMenu = () => {
+  isContextMenuOpen.value = !isContextMenuOpen.value;
+};
+
+// Переключение статуса публичности
+const togglePublicStatus = async () => {
+  try {
+    const newStatus = !props.track.publicTrack;
+    const { error } = await supabase
+      .from("tracks")
+      .update({ publicTrack: newStatus })
+      .eq("idTrack", props.track.id);
+
+    if (error) throw error;
+
+    // Эмитим событие, чтобы родительский компонент мог обновить данные
+    emit("public-status-changed", {
+      trackId: props.track.id,
+      newStatus: newStatus,
+    });
+    isContextMenuOpen.value = false;
+  } catch (e) {
+    console.error("Ошибка при изменении статуса трека:", e);
+    // Здесь можно показать уведомление об ошибке
+  }
+};
+
+// Управление событиями для закрытия меню
+onMounted(() => {
+  document.addEventListener("click", closeContextMenu);
+});
+
+onUnmounted(() => {
+  document.removeEventListener("click", closeContextMenu);
+});
+</script>
+
 <template>
   <div class="track-item">
     <div class="track-left">
@@ -132,35 +214,37 @@
         </svg>
         <span> {{ track.likesCount }}</span>
       </div>
-      <span v-if="showMore" class="more" style="font-weight: bold">···</span>
+      <div class="track-right">
+      <!-- ... остальной код без изменений ... -->
+      <!-- Изменяем условие отображения кнопки "ещё" -->
+      <span
+        v-if="showMore && showThreeDots"
+        ref="moreButtonRef"
+        class="more"
+        style="font-weight: bold; cursor: pointer"
+        @click.stop="toggleContextMenu"
+      >
+        ···
+      </span>
+
+      <!-- Контекстное меню -->
+      <div
+        v-if="isContextMenuOpen"
+        ref="contextMenuRef"
+        class="context-menu"
+        @click.stop
+      >
+        <button
+          class="context-menu-item"
+          @click="togglePublicStatus"
+        >
+          {{ track.publicTrack ? 'Сделать приватным' : 'Сделать публичным' }}
+        </button>
+      </div>
+    </div>
     </div>
   </div>
 </template>
-
-<script setup>
-import { defineProps, defineEmits } from "vue";
-
-const props = defineProps({
-  track: {
-    type: Object,
-    required: true,
-  },
-  showArtistLink: {
-    type: Boolean,
-    default: true,
-  },
-  showMore: {
-    type: Boolean,
-    default: false,
-  },
-});
-
-const emit = defineEmits(["like"]);
-
-const onLike = () => {
-  emit("like");
-};
-</script>
 
 <style scoped>
 .track-item {
@@ -187,6 +271,8 @@ const onLike = () => {
   gap: 8px;
   font-size: 14px;
   color: #bbb;
+    position: relative; /* <-- ДОБАВЬТЕ ЭТУ СТРОКУ */
+
 }
 .track-title {
   font-weight: bold;
@@ -237,5 +323,37 @@ const onLike = () => {
 
 .heart-logo {
   animation: bounceIn 0.8s ease-out;
+}
+
+/* Стили для контекстного меню */
+.context-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  background-color: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  min-width: 180px;
+  overflow: hidden;
+}
+
+.context-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  color: #f3f3f3;
+  text-align: left;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.context-menu-item:hover {
+  background-color: #3a3a3a;
 }
 </style>

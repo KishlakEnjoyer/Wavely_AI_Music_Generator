@@ -92,7 +92,7 @@ async function loadOwnProfileData() {
   // Загрузка треков
   const { data: userTracks, error: tracksError } = await supabase
     .from("tracks")
-    .select("idTrack, titleTrack, durationTrack, dateCreation, authorId, profiles!inner(nickname)")
+    .select("idTrack, titleTrack, durationTrack, dateCreation, authorId, publicTrack, profiles!inner(nickname)")
     .eq("authorId", currentUser.value.id)
     .order("dateCreation", { ascending: false });
 
@@ -127,17 +127,24 @@ async function loadOwnProfileData() {
       }
     }
 
-    tracks.value = userTracks.map((track) => ({
-      id: track.idTrack,
-      title: track.titleTrack,
-      author: track.authorId || "Аноним",
-      authorNick: track.profiles.nickname,
-      duration: formatDuration(track.durationTrack),
-      date: formatDate(track.dateCreation),
-      dateCreation: track.dateCreation,
-      likesCount: likesMap[track.idTrack] || 0,
-      isLikedByUser: !!userLikes[track.idTrack],
-    }));
+    tracks.value = userTracks.map((track) => {
+  let displayTitle = track.titleTrack;
+  if (!track.publicTrack) {
+    displayTitle += " (private)";
+  }
+  return {
+    id: track.idTrack,
+    title: displayTitle,
+    author: track.authorId || "Аноним",
+    authorNick: track.profiles.nickname,
+    duration: formatDuration(track.durationTrack),
+    publicTrack: track.publicTrack,
+    date: formatDate(track.dateCreation),
+    dateCreation: track.dateCreation,
+    likesCount: likesMap[track.idTrack] || 0,
+    isLikedByUser: !!userLikes[track.idTrack],
+  };
+});
     stats.value.totalTracks = tracks.value.length;
   }
 
@@ -398,6 +405,26 @@ const saveProfile = async ({ displayName, newPassword }) => {
   }
 };
 
+const handlePublicStatusChanged = ({ trackId, newStatus }) => {
+  // Находим трек в списке и обновляем его статус и заголовок
+  const track = tracks.value.find(t => t.id === trackId);
+  if (track) {
+    track.publicTrack = newStatus;
+    // Добавляем или убираем "(private)" из заголовка
+    if (!newStatus) {
+      // Делаем приватным
+      if (!track.title.endsWith(" (private)")) {
+        track.title += " (private)";
+      }
+    } else {
+      // Делаем публичным
+      if (track.title.endsWith(" (private)")) {
+        track.title = track.title.slice(0, -10); // Убираем " (private)"
+      }
+    }
+  }
+}
+
 // === Уведомления ===
 const showNotification = (message, type = "info") => {
   notification.value = { show: true, message, type };
@@ -447,14 +474,17 @@ const showNotification = (message, type = "info") => {
       <h2 class="section-title">{{ isOwnProfile ? 'Ваши мелодии' : 'Публичные мелодии' }}</h2>
       <div class="track-scroll-area">
         <div v-if="tracks.length > 0" class="tracks-list">
+          <!-- Внутри ProfilePage.vue -->
           <MelodyElement
-              v-for="track in tracks"
-              :key="track.id"
-              :track="track"
-              :show-artist-link="true"
-              :show-more="true"
-              @like="() => toggleLike(track.id)"
-            />
+            v-for="track in tracks"
+            :key="track.id"
+            :track="track"
+            :show-artist-link="true"
+            :show-more="true"
+            :show-three-dots="isOwnProfile" 
+            @like="() => toggleLike(track.id)"
+            @public-status-changed="handlePublicStatusChanged"
+          />
         </div>
         <p v-else class="empty-state">
           {{ isOwnProfile ? 'У вас пока нет мелодий.' : 'У пользователя пока нет мелодий.' }}
