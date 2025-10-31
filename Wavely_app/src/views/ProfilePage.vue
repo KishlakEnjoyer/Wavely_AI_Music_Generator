@@ -1,120 +1,363 @@
 <script setup>
-import { ref, onMounted } from 'vue'
-import { supabase } from '@/lib/supabase'
+import { ref, onMounted } from "vue";
+import { supabase } from "@/lib/supabase";
+import EditProfileModal from "@/components/EditProfileModal.vue";
 
 // Состояния
-const user = ref(null)
-const tracks = ref([])
-const likedTracks = ref([])
+const user = ref(null);
+const tracks = ref([]);
+const likedTracks = ref([]);
 const stats = ref({
   totalTracks: 0,
   receivedLikes: 0,
-  givenLikes: 0
-})
+  givenLikes: 0,
+});
+
+const isEditModalOpen = ref(false);
+const currentDisplayName = ref("");
+const currentAvatarUrl = ref("");
+
+// Уведомление
+const notification = ref({
+  show: false,
+  message: "",
+  type: "info", // 'info', 'success', 'error'
+});
 
 // Загрузка данных при монтировании
 onMounted(async () => {
-  await loadProfileData()
+  await loadProfileData();
 
   // Анимация blob-ов
-  const blobs = document.querySelectorAll('.blob')
+  const blobs = document.querySelectorAll(".blob");
   setInterval(() => {
-    blobs.forEach(blob => {
-      const randomX = Math.random() * 40 - 20
-      const randomY = Math.random() * 40 - 20
-      const randomScale = 0.9 + Math.random() * 0.2
-      blob.style.transform = `translate(${randomX}px, ${randomY}px) scale(${randomScale})`
-    })
-  }, 1500)
-})
+    blobs.forEach((blob) => {
+      const randomX = Math.random() * 40 - 20;
+      const randomY = Math.random() * 40 - 20;
+      const randomScale = 0.9 + Math.random() * 0.2;
+      blob.style.transform = `translate(${randomX}px, ${randomY}px) scale(${randomScale})`;
+    });
+  }, 1500);
+});
+
+const saveProfile = async ({ displayName, newPassword }) => {
+  try {
+    // 1. Обновляем display_name в auth.users через user_metadata
+    if (displayName !== null) {
+      const { error: nameErr } = await supabase.auth.updateUser({
+        data: { display_name: displayName }
+      });
+      if (nameErr) throw nameErr;
+
+      // Обновляем локальные данные
+      user.value.user_metadata.display_name = displayName;
+      currentDisplayName.value = displayName;
+    }
+
+    // 2. Обновляем nickname в таблице profiles
+    if (displayName !== null) {
+      const { error: profileErr } = await supabase
+        .from('profiles')
+        .update({ nickname: displayName })
+        .eq('userid', user.value.id); // или .eq('authorId', user.value.id), в зависимости от структуры
+
+      if (profileErr) throw profileErr;
+    }
+
+    // 3. Обновляем пароль (если указан)
+    if (newPassword) {
+      const { error: pwdErr } = await supabase.auth.updateUser({
+        password: newPassword
+      });
+      if (pwdErr) throw pwdErr;
+    }
+
+    showNotification("Профиль успешно обновлён!", "success");
+  } catch (e) {
+    console.error("Ошибка обновления профиля:", e.message);
+    showNotification("Не удалось сохранить изменения", "error");
+  }
+};
 
 // Функция загрузки всех данных профиля
 async function loadProfileData() {
-  const { data: { user: currentUser }, error: authError } = await supabase.auth.getUser()
+  const {
+    data: { user: currentUser },
+    error: authError,
+  } = await supabase.auth.getUser();
   if (authError || !currentUser) {
-    console.error('Не удалось получить пользователя:', authError)
-    return
+    console.error("Не удалось получить пользователя:", authError);
+    return;
   }
 
-  user.value = currentUser
+  user.value = currentUser;
+
+  currentDisplayName.value = user.value?.user_metadata?.display_name || "";
+  currentAvatarUrl.value = user.value?.user_metadata?.avatar_url || "";
 
   console.log(user);
 
   // Загрузка треков пользователя
   const { data: userTracks, error: tracksError } = await supabase
-    .from('tracks')
-    .select('*')
-    .eq('authorId', currentUser.id)
-    .order('dateCreation', { ascending: false })
+    .from("tracks")
+    .select(
+      "idTrack, titleTrack, durationTrack, dateCreation, authorId, profiles!inner(nickname)"
+    )
+    .eq("authorId", currentUser.id)
+    .order("dateCreation", { ascending: false });
 
   if (tracksError) {
-    console.error('Ошибка загрузки треков:', tracksError)
+    console.error("Ошибка загрузки треков:", tracksError);
   } else {
-    tracks.value = userTracks
-    stats.value.totalTracks = userTracks.length
+    // Подготавливаем треки
+    const trackIds = userTracks.map((t) => t.idTrack);
+    let likesMap = {};
+    const userLikes = {};
+
+    // Загружаем ВСЕ лайки для этих треков
+    if (trackIds.length > 0) {
+      const { data: likesData, error: likesErr } = await supabase
+        .from("likes")
+        .select("idTrack")
+        .in("idTrack", trackIds);
+
+      if (likesErr) {
+        console.error("Ошибка загрузки лайков:", likesErr);
+      } else if (likesData && Array.isArray(likesData)) {
+        likesMap = likesData.reduce((acc, like) => {
+          acc[like.idTrack] = (acc[like.idTrack] || 0) + 1;
+          return acc;
+        }, {});
+      }
+
+      // Загружаем лайки ТЕКУЩЕГО пользователя
+      const { data: userLikesData, error: userLikesErr } = await supabase
+        .from("likes")
+        .select("idTrack")
+        .eq("authorId", user.value.id)
+        .in("idTrack", trackIds);
+
+      if (userLikesErr) {
+        console.error("Ошибка загрузки моих лайков:", userLikesErr);
+      } else if (userLikesData && Array.isArray(userLikesData)) {
+        userLikesData.forEach((like) => {
+          userLikes[like.idTrack] = true;
+        });
+      }
+    }
+
+    tracks.value = userTracks.map((track) => ({
+      id: track.idTrack,
+      title: track.titleTrack,
+      author: track.authorId || "Аноним",
+      authorNick: track.profiles.nickname,
+      duration: formatDuration(track.durationTrack),
+      date: formatDate(track.dateCreation),
+      dateCreation: track.dateCreation,
+      likesCount: likesMap[track.idTrack] || 0,
+      isLikedByUser: !!userLikes[track.idTrack],
+    }));
+
+    stats.value.totalTracks = tracks.value.length;
   }
-  console.log(tracks);
-  console.log(stats);
 
   // Загрузка лайкнутых треков (лайки, поставленные текущим пользователем)
   const { data: givenLikes, error: likesError } = await supabase
-    .from('likes')
-    .select('idTrack')
-    .eq('authorId', currentUser.id)
+    .from("likes")
+    .select("idTrack")
+    .eq("authorId", currentUser.id);
 
   if (likesError) {
-    console.error('Ошибка загрузки лайков:', likesError)
+    console.error("Ошибка загрузки лайков:", likesError);
   } else {
-    stats.value.givenLikes = givenLikes.length
+    stats.value.givenLikes = givenLikes.length;
 
     // Получаем полную информацию о лайкнутых треках
     if (givenLikes.length > 0) {
-      const trackIds = givenLikes.map(like => like.idTrack)
+      const trackIds = givenLikes.map((like) => like.idTrack);
       const { data: likedTrackDetails, error: detailError } = await supabase
-        .from('tracks')
-        .select('*')
-        .in('id', trackIds)
-        .order('dateCreation', { ascending: false })
+        .from("tracks")
+        .select(
+          "idTrack, titleTrack, durationTrack, dateCreation, authorId, profiles!inner(nickname)"
+        )
+        .in("idTrack", trackIds)
+        .order("dateCreation", { ascending: false });
 
       if (detailError) {
-        console.error('Ошибка загрузки деталей лайкнутых треков:', detailError)
+        console.error("Ошибка загрузки деталей лайкнутых треков:", detailError);
       } else {
-        likedTracks.value = likedTrackDetails
+        // Подготавливаем лайкнутые треки
+        const likedTrackIds = likedTrackDetails.map((t) => t.idTrack);
+        let likedTrackLikesMap = {};
+        const likedUserLikes = {};
+
+        if (likedTrackIds.length > 0) {
+          const { data: likesData, error: likesErr } = await supabase
+            .from("likes")
+            .select("idTrack")
+            .in("idTrack", likedTrackIds);
+
+          if (likesErr) {
+            console.error(
+              "Ошибка загрузки лайков для лайкнутых треков:",
+              likesErr
+            );
+          } else if (likesData && Array.isArray(likesData)) {
+            likedTrackLikesMap = likesData.reduce((acc, like) => {
+              acc[like.idTrack] = (acc[like.idTrack] || 0) + 1;
+              return acc;
+            }, {});
+          }
+
+          const { data: userLikesData, error: userLikesErr } = await supabase
+            .from("likes")
+            .select("idTrack")
+            .eq("authorId", user.value.id)
+            .in("idTrack", likedTrackIds);
+
+          if (userLikesErr) {
+            console.error(
+              "Ошибка загрузки моих лайков для лайкнутых треков:",
+              userLikesErr
+            );
+          } else if (userLikesData && Array.isArray(userLikesData)) {
+            userLikesData.forEach((like) => {
+              likedUserLikes[like.idTrack] = true;
+            });
+          }
+        }
+
+        likedTracks.value = likedTrackDetails.map((track) => ({
+          id: track.idTrack,
+          title: track.titleTrack,
+          author: track.authorId || "Аноним",
+          authorNick: track.profiles.nickname,
+          duration: formatDuration(track.durationTrack),
+          date: formatDate(track.dateCreation),
+          dateCreation: track.dateCreation,
+          likesCount: likedTrackLikesMap[track.idTrack] || 0,
+          isLikedByUser: !!likedUserLikes[track.idTrack],
+        }));
       }
     }
   }
 
   // Подсчёт полученных лайков (все лайки на треки пользователя)
-  const { data, count, error } = await supabase
-    .from('likes')
-    .select('*')
-    .in('idTrack', userTracks.map(t => t.idTrack))
+  const userTrackIds = userTracks.map((t) => t.idTrack); // Используем правильное поле ID трека
 
-  if (error) { // Используем 'error', а не 'countError'
-    console.error('Ошибка подсчёта полученных лайков:', error)
+  if (userTrackIds.length > 0) {
+    // Выполняем запрос только если есть ID треков
+    // Получаем ID треков текущего пользователя
+    const { data: userTracks, error: tracksError } = await supabase
+      .from("tracks")
+      .select("idTrack")
+      .eq("authorId", currentUser.id);
+
+    if (tracksError) {
+      console.error("Ошибка загрузки треков пользователя:", tracksError);
+      stats.value.receivedLikes = 0;
+    } else if (userTracks.length === 0) {
+      // Если у пользователя нет треков — лайков тоже нет
+      stats.value.receivedLikes = 0;
+    } else {
+      const userTrackIds = userTracks.map((t) => t.idTrack);
+
+      // Считаем лайки ТОЛЬКО на эти треки
+      const { count: receivedLikesCount, error: countError } = await supabase
+        .from("likes")
+        .select("*", { count: "exact" })
+        .in("idTrack", userTrackIds);
+
+      if (countError) {
+        console.error("Ошибка подсчёта полученных лайков:", countError);
+        stats.value.receivedLikes = 0;
+      } else {
+        stats.value.receivedLikes = receivedLikesCount || 0;
+      }
+    }
   } else {
-    stats.value.receivedLikes = count || 0 // Используем 'count', а не 'receivedLikesCount?.count'
+    // Если у пользователя нет треков, лайков тоже нет
+    stats.value.receivedLikes = 0;
   }
 }
 
 // Форматирование даты
 const formatDate = (dateStr) => {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  return date.toLocaleDateString('ru-RU', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric'
-  })
-}
+  if (!dateStr) return "";
+  const date = new Date(dateStr);
+  return date.toLocaleDateString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+};
 
 // Форматирование времени (длительность)
 const formatDuration = (seconds) => {
-  if (!seconds) return '0:00'
-  const mins = Math.floor(seconds / 60)
-  const secs = seconds % 60
-  return `${mins}:${secs.toString().padStart(2, '0')}`
-}
+  if (!seconds) return "0:00";
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+};
+
+const toggleLike = async (trackId) => {
+  if (!user.value) {
+    showNotification('Пожалуйста, войдите в аккаунт, чтобы ставить лайки', 'info')
+    return
+  }
+
+  try {
+    // Обновляем лайк в базе
+    const isNowLiked = !(
+      tracks.value.find(t => t.id === trackId)?.isLikedByUser ||
+      likedTracks.value.find(t => t.id === trackId)?.isLikedByUser
+    );
+
+    if (isNowLiked) {
+      await supabase.from('likes').insert({
+        idTrack: trackId,
+        authorId: user.value.id
+      });
+    } else {
+      await supabase
+        .from('likes')
+        .delete()
+        .match({ idTrack: trackId, authorId: user.value.id });
+    }
+
+    // Обновляем Ваши мелодии
+    const trackIndexInOwn = tracks.value.findIndex(t => t.id === trackId);
+    if (trackIndexInOwn !== -1) {
+      tracks.value[trackIndexInOwn].isLikedByUser = isNowLiked;
+      tracks.value[trackIndexInOwn].likesCount += isNowLiked ? 1 : -1;
+    }
+
+    // Обновляем Лайкнутые мелодии
+    const trackIndexInLiked = likedTracks.value.findIndex(t => t.id === trackId);
+    if (trackIndexInLiked !== -1) {
+      likedTracks.value[trackIndexInLiked].isLikedByUser = isNowLiked;
+      likedTracks.value[trackIndexInLiked].likesCount += isNowLiked ? 1 : -1;
+    }
+
+    // Обновляем статистику "поставленных лайков"
+    if (isNowLiked) {
+      stats.value.givenLikes += 1;
+    } else {
+      stats.value.givenLikes -= 1;
+    }
+  } catch (e) {
+    console.error('Ошибка при лайке:', e);
+    showNotification('Не удалось обновить лайк', 'error');
+  }
+};
+
+// Функция для уведомлений
+const showNotification = (message, type = "info") => {
+  notification.value = { show: true, message, type };
+  setTimeout(() => {
+    notification.value.show = false;
+  }, 3000);
+};
 </script>
 
 <template>
@@ -130,16 +373,35 @@ const formatDuration = (seconds) => {
     <div class="blob"></div>
   </div>
 
-  <!-- Профиль -->
+  <!-- Обертка для скролла -->
   <div class="profile-page">
+    <button class="back-button" @click="$router.back()">
+      <svg
+        width="24"
+        height="24"
+        viewBox="0 0 24 24"
+        fill="none"
+        xmlns="http://www.w3.org/2000/svg"
+      >
+        <path
+          d="M19 12H5M5 12L11 6M5 12L11 18"
+          stroke="white"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        />
+      </svg>
+    </button>
     <div class="profile-container">
-      <!-- Шапка профиля -->
       <div class="profile-header">
-        <h1 class="display-name">{{ user?.user_metadata?.display_name || user?.email }}</h1>
-        <button class="edit-btn">Редактировать профиль</button>
+        <h1 class="display-name">
+          {{ user?.user_metadata?.display_name || user?.email }}
+        </h1>
+        <button class="edit-btn" @click="isEditModalOpen = true">
+          Редактировать профиль
+        </button>
       </div>
 
-      <!-- Статистика -->
       <div class="stats">
         <p>● Кол-во мелодий: {{ stats.totalTracks }}</p>
         <p>● Кол-во полученных лайков: {{ stats.receivedLikes }}</p>
@@ -148,83 +410,299 @@ const formatDuration = (seconds) => {
 
       <!-- Ваши мелодии -->
       <h2 class="section-title">Ваши мелодии</h2>
-      <div v-if="tracks.length > 0" class="tracks-list">
-        <div v-for="track in tracks" :key="track.id" class="track-item">
-          <div class="track-left">
-            <svg class="heart-logo" width="23" height="23" viewBox="0 0 30 27" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M26.7217 3.1491C26.0407 2.46777 25.2321 1.9273 24.3422 1.55855C23.4522 1.1898 22.4984 1 21.5351 1C20.5717 1 19.6179 1.1898 18.7279 1.55855C17.838 1.9273 17.0294 2.46777 16.3484 3.1491L14.9351 4.56243L13.5217 3.1491C12.1461 1.77351 10.2804 1.00071 8.33505 1.00071C6.38968 1.00071 4.52398 1.77351 3.14839 3.1491C1.7728 4.52469 1 6.39039 1 8.33577C1 10.2811 1.7728 12.1468 3.14839 13.5224L14.9351 25.3091L26.7217 13.5224C27.403 12.8414 27.9435 12.0329 28.3123 11.1429C28.681 10.253 28.8708 9.29908 28.8708 8.33577C28.8708 7.37245 28.681 6.41857 28.3123 5.52863C27.9435 4.63868 27.403 3.83011 26.7217 3.1491Z" stroke="#F3F3F3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span class="track-title">{{ track.titleTrack }}</span>
-            <span class="separator">|</span>
-            <span class="artist">{{ track.artist }}</span>
-          </div>
-          <div class="track-right">
-            <div class="duration">
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M6.33333 2.83333V6.33333L8.66667 7.5M12.1667 6.33333C12.1667 9.55499 9.55499 12.1667 6.33333 12.1667C3.11167 12.1667 0.5 9.55499 0.5 6.33333C0.5 3.11167 3.11167 0.5 6.33333 0.5C9.55499 0.5 12.1667 3.11167 12.1667 6.33333Z" stroke="#F3F3F3" stroke-opacity="0.5" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              {{ formatDuration(track.durationTrack) }}
-            </div>
-            <span class="separator">|</span>
-            <div class="date">
-              <svg width="12" height="13" viewBox="0 0 12 13" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M8.08333 0.5V2.83333M3.41667 0.5V2.83333M0.5 5.16667H11M1.66667 1.66667H9.83333C10.4777 1.66667 11 2.189 11 2.83333V11C11 11.6443 10.4777 12.1667 9.83333 12.1667H1.66667C1.02233 12.1667 0.5 11.6443 0.5 11V2.83333C0.5 2.189 1.02233 1.66667 1.66667 1.66667Z" stroke="#F3F3F3" stroke-opacity="0.5" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              {{ formatDate(track.dateCreation) }}
-            </div>
-            <span class="separator">|</span>
-            <div class="likes">
-              <svg width="15" height="14" viewBox="0 0 15 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M13.3609 1.57455C13.0204 1.23389 12.6161 0.963648 12.1711 0.779273C11.7261 0.594898 11.2492 0.5 10.7675 0.5C10.2859 0.5 9.80893 0.594898 9.36396 0.779273C8.91898 0.963648 8.5147 1.23389 8.17419 1.57455L7.46753 2.28122L6.76086 1.57455C6.07307 0.886756 5.14022 0.500357 4.16753 0.500357C3.19484 0.500357 2.26199 0.886756 1.57419 1.57455C0.886399 2.26235 0.5 3.19519 0.5 4.16788C0.5 5.14057 0.886399 6.07342 1.57419 6.76122L7.46753 12.6545L13.3609 6.76122C13.7015 6.42071 13.9718 6.01643 14.1561 5.57145C14.3405 5.12648 14.4354 4.64954 14.4354 4.16788C14.4354 3.68623 14.3405 3.20929 14.1561 2.76431C13.9718 2.31934 13.7015 1.91505 13.3609 1.57455Z" stroke="#5A5A5A" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              {{ track.likes_count || 0 }}
-            </div>
-            <span class="more">...</span>
-          </div>
-        </div>
-      </div>
-      <p v-else class="empty-state">У вас пока нет мелодий.</p>
+      <div class="track-scroll-area">
+        <div v-if="tracks.length > 0" class="tracks-list">
+          <div v-for="track in tracks" :key="track.id" class="track-item">
+            <div class="track-left">
+              <span
+                @click.stop="toggleLike(track.id)"
+                class="heart-icon"
+                style="cursor: pointer; display: flex; align-items: center"
+              >
+                <svg
+                  class="heart-logo"
+                  v-if="!track.isLikedByUser"
+                  width="23"
+                  height="23"
+                  viewBox="0 0 30 27"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M26.7217 3.1491C26.0407 2.46777 25.2321 1.9273 24.3422 1.55855C23.4522 1.1898 22.4984 1 21.5351 1C20.5717 1 19.6179 1.1898 18.7279 1.55855C17.838 1.9273 17.0294 2.46777 16.3484 3.1491L14.9351 4.56243L13.5217 3.1491C12.1461 1.77351 10.2804 1.00071 8.33505 1.00071C6.38968 1.00071 4.52398 1.77351 3.14839 3.1491C1.7728 4.52469 1 6.39039 1 8.33577C1 10.2811 1.7728 12.1468 3.14839 13.5224L14.9351 25.3091L26.7217 13.5224C27.403 12.8414 27.9435 12.0329 28.3123 11.1429C28.681 10.253 28.8708 9.29908 28.8708 8.33577C28.8708 7.37245 28.681 6.41857 28.3123 5.52863C27.9435 4.63868 27.403 3.83011 26.7217 3.1491Z"
+                    stroke="#F3F3F3"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
 
-      <!-- Ваши лайкнутые мелодии -->
-      <h2 class="section-title">Ваши лайкнутые мелодии</h2>
-      <div v-if="likedTracks.length > 0" class="tracks-list">
-        <div v-for="track in likedTracks" :key="track.id" class="track-item">
-          <div class="track-left">
-            <svg class="heart-logo" width="23" height="23" viewBox="0 0 30 27" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M26.7217 3.1491C26.0407 2.46777 25.2321 1.9273 24.3422 1.55855C23.4522 1.1898 22.4984 1 21.5351 1C20.5717 1 19.6179 1.1898 18.7279 1.55855C17.838 1.9273 17.0294 2.46777 16.3484 3.1491L14.9351 4.56243L13.5217 3.1491C12.1461 1.77351 10.2804 1.00071 8.33505 1.00071C6.38968 1.00071 4.52398 1.77351 3.14839 3.1491C1.7728 4.52469 1 6.39039 1 8.33577C1 10.2811 1.7728 12.1468 3.14839 13.5224L14.9351 25.3091L26.7217 13.5224C27.403 12.8414 27.9435 12.0329 28.3123 11.1429C28.681 10.253 28.8708 9.29908 28.8708 8.33577C28.8708 7.37245 28.681 6.41857 28.3123 5.52863C27.9435 4.63868 27.403 3.83011 26.7217 3.1491Z" stroke="#F3F3F3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <span class="track-title">{{ track.titleTrack }}</span>
-            <span class="separator">|</span>
-            <span class="artist">{{ track.artist }}</span>
-          </div>
-          <div class="track-right">
-            <div class="duration">
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M6.33333 2.83333V6.33333L8.66667 7.5M12.1667 6.33333C12.1667 9.55499 9.55499 12.1667 6.33333 12.1667C3.11167 12.1667 0.5 9.55499 0.5 6.33333C0.5 3.11167 3.11167 0.5 6.33333 0.5C9.55499 0.5 12.1667 3.11167 12.1667 6.33333Z" stroke="#F3F3F3" stroke-opacity="0.5" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              {{ formatDuration(track.durationTrack) }}
+                <svg
+                  v-else
+                  class="heart-logo"
+                  width="23"
+                  height="23"
+                  viewBox="0 0 29 26"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M26.2217 2.6491C25.5407 1.96777 24.7321 1.4273 23.8422 1.05855C22.9522 0.689796 21.9984 0.5 21.0351 0.5C20.0717 0.5 19.1179 0.689796 18.2279 1.05855C17.338 1.4273 16.5294 1.96777 15.8484 2.6491L14.4351 4.06243L13.0217 2.6491C11.6461 1.27351 9.78043 0.500713 7.83505 0.500713C5.88968 0.500713 4.02398 1.27351 2.64839 2.6491C1.2728 4.02469 0.5 5.89039 0.5 7.83577C0.5 9.78114 1.2728 11.6468 2.64839 13.0224L14.4351 24.8091L26.2217 13.0224C26.903 12.3414 27.4435 11.5329 27.8123 10.6429C28.181 9.75296 28.3708 8.79908 28.3708 7.83577C28.3708 6.87245 28.181 5.91857 27.8123 5.02863C27.4435 4.13868 26.903 3.33011 26.2217 2.6491Z"
+                    fill="url(#paint0_linear_273_11)"
+                    stroke="url(#paint1_linear_273_11)"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <defs>
+                    <linearGradient
+                      id="paint0_linear_273_11"
+                      x1="3.43506"
+                      y1="4.00244"
+                      x2="24.4351"
+                      y2="21.0024"
+                      gradientUnits="userSpaceOnUse"
+                    >
+                      <stop stop-color="#26CEE6" />
+                      <stop offset="1" stop-color="#DA27F5" />
+                    </linearGradient>
+                    <linearGradient
+                      id="paint1_linear_273_11"
+                      x1="0.435059"
+                      y1="0.502441"
+                      x2="28.4351"
+                      y2="24.5024"
+                      gradientUnits="userSpaceOnUse"
+                    >
+                      <stop stop-color="#26CEE6" />
+                      <stop offset="1" stop-color="#B747F2" />
+                    </linearGradient>
+                  </defs>
+                </svg>
+              </span>
+
+              <span class="track-title">{{ track.title }}</span>
+              <span class="separator">|</span>
+              <span class="artist">{{ track.authorNick }}</span>
             </div>
-            <span class="separator">|</span>
-            <div class="date">
-              <svg width="12" height="13" viewBox="0 0 12 13" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M8.08333 0.5V2.83333M3.41667 0.5V2.83333M0.5 5.16667H11M1.66667 1.66667H9.83333C10.4777 1.66667 11 2.189 11 2.83333V11C11 11.6443 10.4777 12.1667 9.83333 12.1667H1.66667C1.02233 12.1667 0.5 11.6443 0.5 11V2.83333C0.5 2.189 1.02233 1.66667 1.66667 1.66667Z" stroke="#F3F3F3" stroke-opacity="0.5" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              {{ formatDate(track.dateCreation) }}
+            <div class="track-right">
+              <div class="duration" style="display: flex">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 13 13"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M6.33333 2.83333V6.33333L8.66667 7.5M12.1667 6.33333C12.1667 9.55499 9.55499 12.1667 6.33333 12.1667C3.11167 12.1667 0.5 9.55499 0.5 6.33333C0.5 3.11167 3.11167 0.5 6.33333 0.5C9.55499 0.5 12.1667 3.11167 12.1667 6.33333Z"
+                    stroke="#F3F3F3"
+                    stroke-opacity="0.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                {{ track.duration }}
+              </div>
+              <span class="separator">|</span>
+              <div class="date" style="display: flex">
+                <svg
+                  width="12"
+                  height="13"
+                  viewBox="0 0 12 13"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M8.08333 0.5V2.83333M3.41667 0.5V2.83333M0.5 5.16667H11M1.66667 1.66667H9.83333C10.4777 1.66667 11 2.189 11 2.83333V11C11 11.6443 10.4777 12.1667 9.83333 12.1667H1.66667C1.02233 12.1667 0.5 11.6443 0.5 11V2.83333C0.5 2.189 1.02233 1.66667 1.66667 1.66667Z"
+                    stroke="#F3F3F3"
+                    stroke-opacity="0.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                <span> {{ track.date }}</span>
+              </div>
+              <span class="separator">|</span>
+              <div class="likes" style="display: flex">
+                <svg
+                  width="15"
+                  height="14"
+                  viewBox="0 0 15 14"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M13.3609 1.57455C13.0204 1.23389 12.6161 0.963648 12.1711 0.779273C11.7261 0.594898 11.2492 0.5 10.7675 0.5C10.2859 0.5 9.80893 0.594898 9.36396 0.779273C8.91898 0.963648 8.5147 1.23389 8.17419 1.57455L7.46753 2.28122L6.76086 1.57455C6.07307 0.886756 5.14022 0.500357 4.16753 0.500357C3.19484 0.500357 2.26199 0.886756 1.57419 1.57455C0.886399 2.26235 0.5 3.19519 0.5 4.16788C0.5 5.14057 0.886399 6.07342 1.57419 6.76122L7.46753 12.6545L13.3609 6.76122C13.7015 6.42071 13.9718 6.01643 14.1561 5.57145C14.3405 5.12648 14.4354 4.64954 14.4354 4.16788C14.4354 3.68623 14.4354 3.20929 14.1561 2.76431C13.9718 2.31934 13.7015 1.91505 13.3609 1.57455Z"
+                    stroke="#5A5A5A"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                <span> {{ track.likesCount }}</span>
+              </div>
+              <span class="more" style="font-weight: bold">···</span>
             </div>
-            <span class="separator">|</span>
-            <div class="likes">
-              <svg width="15" height="14" viewBox="0 0 15 14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M13.3609 1.57455C13.0204 1.23389 12.6161 0.963648 12.1711 0.779273C11.7261 0.594898 11.2492 0.5 10.7675 0.5C10.2859 0.5 9.80893 0.594898 9.36396 0.779273C8.91898 0.963648 8.5147 1.23389 8.17419 1.57455L7.46753 2.28122L6.76086 1.57455C6.07307 0.886756 5.14022 0.500357 4.16753 0.500357C3.19484 0.500357 2.26199 0.886756 1.57419 1.57455C0.886399 2.26235 0.5 3.19519 0.5 4.16788C0.5 5.14057 0.886399 6.07342 1.57419 6.76122L7.46753 12.6545L13.3609 6.76122C13.7015 6.42071 13.9718 6.01643 14.1561 5.57145C14.3405 5.12648 14.4354 4.64954 14.4354 4.16788C14.4354 3.68623 14.3405 3.20929 14.1561 2.76431C13.9718 2.31934 13.7015 1.91505 13.3609 1.57455Z" stroke="#5A5A5A" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              {{ track.likes_count || 0 }}
-            </div>
-            <span class="more">...</span>
           </div>
         </div>
+        <p v-else class="empty-state">У вас пока нет мелодий.</p>
       </div>
-      <p v-else class="empty-state">Вы ещё не лайкнули ни одной мелодии.</p>
+
+      <h2 class="section-title">Ваши лайкнутые мелодии</h2>
+      <div class="track-scroll-area">
+        <div v-if="likedTracks.length > 0" class="tracks-list">
+          <div v-for="track in likedTracks" :key="track.id" class="track-item">
+            <div class="track-left">
+              <span
+                @click.stop="toggleLike(track.id)"
+                class="heart-icon"
+                style="cursor: pointer; display: flex; align-items: center"
+              >
+                <svg
+                  class="heart-logo"
+                  v-if="!track.isLikedByUser"
+                  width="23"
+                  height="23"
+                  viewBox="0 0 30 27"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M26.7217 3.1491C26.0407 2.46777 25.2321 1.9273 24.3422 1.55855C23.4522 1.1898 22.4984 1 21.5351 1C20.5717 1 19.6179 1.1898 18.7279 1.55855C17.838 1.9273 17.0294 2.46777 16.3484 3.1491L14.9351 4.56243L13.5217 3.1491C12.1461 1.77351 10.2804 1.00071 8.33505 1.00071C6.38968 1.00071 4.52398 1.77351 3.14839 3.1491C1.7728 4.52469 1 6.39039 1 8.33577C1 10.2811 1.7728 12.1468 3.14839 13.5224L14.9351 25.3091L26.7217 13.5224C27.403 12.8414 27.9435 12.0329 28.3123 11.1429C28.681 10.253 28.8708 9.29908 28.8708 8.33577C28.8708 7.37245 28.681 6.41857 28.3123 5.52863C27.9435 4.63868 27.403 3.83011 26.7217 3.1491Z"
+                    stroke="#F3F3F3"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+
+                <svg
+                  v-else
+                  class="heart-logo"
+                  width="23"
+                  height="23"
+                  viewBox="0 0 29 26"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M26.2217 2.6491C25.5407 1.96777 24.7321 1.4273 23.8422 1.05855C22.9522 0.689796 21.9984 0.5 21.0351 0.5C20.0717 0.5 19.1179 0.689796 18.2279 1.05855C17.338 1.4273 16.5294 1.96777 15.8484 2.6491L14.4351 4.06243L13.0217 2.6491C11.6461 1.27351 9.78043 0.500713 7.83505 0.500713C5.88968 0.500713 4.02398 1.27351 2.64839 2.6491C1.2728 4.02469 0.5 5.89039 0.5 7.83577C0.5 9.78114 1.2728 11.6468 2.64839 13.0224L14.4351 24.8091L26.2217 13.0224C26.903 12.3414 27.4435 11.5329 27.8123 10.6429C28.181 9.75296 28.3708 8.79908 28.3708 7.83577C28.3708 6.87245 28.181 5.91857 27.8123 5.02863C27.4435 4.13868 26.903 3.33011 26.2217 2.6491Z"
+                    fill="url(#paint0_linear_273_11)"
+                    stroke="url(#paint1_linear_273_11)"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                  <defs>
+                    <linearGradient
+                      id="paint0_linear_273_11"
+                      x1="3.43506"
+                      y1="4.00244"
+                      x2="24.4351"
+                      y2="21.0024"
+                      gradientUnits="userSpaceOnUse"
+                    >
+                      <stop stop-color="#26CEE6" />
+                      <stop offset="1" stop-color="#DA27F5" />
+                    </linearGradient>
+                    <linearGradient
+                      id="paint1_linear_273_11"
+                      x1="0.435059"
+                      y1="0.502441"
+                      x2="28.4351"
+                      y2="24.5024"
+                      gradientUnits="userSpaceOnUse"
+                    >
+                      <stop stop-color="#26CEE6" />
+                      <stop offset="1" stop-color="#B747F2" />
+                    </linearGradient>
+                  </defs>
+                </svg>
+              </span>
+
+              <span class="track-title">{{ track.title }}</span>
+              <span class="separator">|</span>
+              <RouterLink :to="`/user/${track.author}`" class="artist">{{ track.authorNick }}</RouterLink>            
+            </div>
+            <div class="track-right">
+              <div class="duration" style="display: flex">
+                <svg
+                  width="13"
+                  height="13"
+                  viewBox="0 0 13 13"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M6.33333 2.83333V6.33333L8.66667 7.5M12.1667 6.33333C12.1667 9.55499 9.55499 12.1667 6.33333 12.1667C3.11167 12.1667 0.5 9.55499 0.5 6.33333C0.5 3.11167 3.11167 0.5 6.33333 0.5C9.55499 0.5 12.1667 3.11167 12.1667 6.33333Z"
+                    stroke="#F3F3F3"
+                    stroke-opacity="0.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                {{ track.duration }}
+              </div>
+              <span class="separator">|</span>
+              <div class="date" style="display: flex">
+                <svg
+                  width="12"
+                  height="13"
+                  viewBox="0 0 12 13"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M8.08333 0.5V2.83333M3.41667 0.5V2.83333M0.5 5.16667H11M1.66667 1.66667H9.83333C10.4777 1.66667 11 2.189 11 2.83333V11C11 11.6443 10.4777 12.1667 9.83333 12.1667H1.66667C1.02233 12.1667 0.5 11.6443 0.5 11V2.83333C0.5 2.189 1.02233 1.66667 1.66667 1.66667Z"
+                    stroke="#F3F3F3"
+                    stroke-opacity="0.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                <span> {{ track.date }}</span>
+              </div>
+              <span class="separator">|</span>
+              <div class="likes" style="display: flex">
+                <svg
+                  width="15"
+                  height="14"
+                  viewBox="0 0 15 14"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M13.3609 1.57455C13.0204 1.23389 12.6161 0.963648 12.1711 0.779273C11.7261 0.594898 11.2492 0.5 10.7675 0.5C10.2859 0.5 9.80893 0.594898 9.36396 0.779273C8.91898 0.963648 8.5147 1.23389 8.17419 1.57455L7.46753 2.28122L6.76086 1.57455C6.07307 0.886756 5.14022 0.500357 4.16753 0.500357C3.19484 0.500357 2.26199 0.886756 1.57419 1.57455C0.886399 2.26235 0.5 3.19519 0.5 4.16788C0.5 5.14057 0.886399 6.07342 1.57419 6.76122L7.46753 12.6545L13.3609 6.76122C13.7015 6.42071 13.9718 6.01643 14.1561 5.57145C14.3405 5.12648 14.4354 4.64954 14.4354 4.16788C14.4354 3.68623 14.4354 3.20929 14.1561 2.76431C13.9718 2.31934 13.7015 1.91505 13.3609 1.57455Z"
+                    stroke="#5A5A5A"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                <span> {{ track.likesCount }}</span>
+              </div>
+              <span class="more" style="font-weight: bold">···</span>
+            </div>
+          </div>
+        </div>
+        <p v-else class="empty-state">Вы ещё не лайкнули ни одной мелодии.</p>
+      </div>
     </div>
   </div>
+
+  <!-- Уведомление -->
+  <div
+    v-if="notification.show"
+    class="notification"
+    :class="`notification--${notification.type}`"
+  >
+    {{ notification.message }}
+  </div>
+
+  <EditProfileModal
+    :is-open="isEditModalOpen"
+    :display-name="currentDisplayName"
+    :avatar-url="currentAvatarUrl"
+    @close="isEditModalOpen = false"
+    @save="saveProfile"
+  />
 </template>
 
 <style scoped>
@@ -302,7 +780,8 @@ const formatDuration = (seconds) => {
 }
 
 @keyframes float {
-  0%, 100% {
+  0%,
+  100% {
     transform: translate(0, 0) scale(1);
     border-radius: 60% 40% 30% 70% / 60% 30% 70% 40%;
   }
@@ -327,25 +806,28 @@ const formatDuration = (seconds) => {
 /* === ПРОФИЛЬ === */
 .profile-page {
   width: 100vw;
-  height: 100vh;
+  min-height: 100vh;
   display: flex;
   justify-content: center;
-  align-items: center;
-  padding: 0;
+  align-items: flex-start;
+  padding: 20px 0;
   margin: 0;
   box-sizing: border-box;
-  font-family: 'Jaldi', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: "Jaldi", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  position: relative;
+  z-index: 1;
 }
 
 .profile-container {
   width: 100%;
-  max-width: 650px;
+  max-width: 850px;
   background-color: #121212f1;
   color: white;
   padding: 40px;
   border-radius: 16px;
   box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(10px);
+  box-sizing: border-box;
 }
 
 .profile-header {
@@ -396,14 +878,12 @@ const formatDuration = (seconds) => {
 }
 
 .track-item {
-  background-color: #1e1e1e;
-  padding: 18px 24px;
-  border-radius: 8px;
   display: flex;
-  justify-content: space-between; /* Изменено с align-items */
+  justify-content: space-between;
   align-items: center;
-  gap: 14px;
-  font-size: 16px;
+  background-color: #1e1e1e;
+  padding: 12px 16px;
+  border-radius: 8px;
   transition: background-color 0.2s;
 }
 
@@ -411,63 +891,42 @@ const formatDuration = (seconds) => {
   background-color: #252525;
 }
 
+.track-item .heart-icon {
+  font-size: 22px;
+}
+
 .track-left {
   display: flex;
   align-items: center;
-  gap: 10px; /* Увеличен отступ */
-  flex-grow: 1; /* Занимает всё доступное пространство слева */
-  overflow: hidden; /* Скрывает переполняющий текст */
+  gap: 5px;
+  font-size: 16px;
 }
 
 .track-right {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 8px;
   font-size: 14px;
-  color: #ccc;
-  flex-shrink: 0; /* Не сжимается */
-}
-
-.heart-logo {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
+  color: #bbb;
 }
 
 .track-title {
   font-weight: bold;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.artist {
-  color: #aaa;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 18px;
+  padding: 0px 0px 0px 10px;
 }
 
 .separator {
-  margin: 0 8px;
   color: #a5a5a5;
+  margin: 0 8px;
 }
 
-.duration, .date, .likes {
+.track-meta {
   display: flex;
   align-items: center;
-  gap: 4px;
-}
-
-.more {
-  cursor: pointer;
-  opacity: 0.7;
-  margin-left: 8px; /* Отступ слева от лайков */
-}
-
-.more:hover {
-  opacity: 1;
-  text-decoration: underline;
+  gap: 14px;
+  font-size: 14px;
+  color: #ccc;
 }
 
 .empty-state {
@@ -476,5 +935,122 @@ const formatDuration = (seconds) => {
   padding: 30px 0;
   font-style: italic;
   font-size: 16px;
+}
+
+.more {
+  cursor: pointer;
+  opacity: 0.7;
+  font-size: 14px;
+}
+
+.more:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.duration,
+.date,
+.likes,
+.more {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* === УВЕДОМЛЕНИЯ === */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.notification {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 12px 24px;
+  border-radius: 8px;
+  color: white;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  background-color: #333;
+  animation: slideIn 0.3s ease-out, fadeOut 0.3s ease-in 2.7s;
+}
+
+.notification--success {
+  background-color: #4caf50;
+}
+
+.notification--error {
+  background-color: #f44336;
+}
+
+.notification--info {
+  background-color: #2196f3;
+}
+
+/* === НЕЗАВИСИМЫЕ ПРОКРУЧИВАЕМЫЕ ОБЛАСТИ ДЛЯ ТРЕКОВ === */
+.track-scroll-area {
+  max-height: 220px; /* Можно настроить под дизайн */
+  overflow-y: auto;
+  padding: 8px 0;
+  margin-bottom: 20px;
+  border-radius: 8px;
+  background-color: #1a1a1a10; /* Очень лёгкий фон для контраста */
+}
+
+/* Стили полосы прокрутки */
+.track-scroll-area::-webkit-scrollbar {
+  width: 6px;
+}
+.track-scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 3px;
+}
+.track-scroll-area::-webkit-scrollbar-thumb {
+  background-color: #555;
+  border-radius: 3px;
+}
+.track-scroll-area::-webkit-scrollbar-thumb:hover {
+  background-color: #777;
+}
+
+/* === КНОПКА НАЗАД === */
+.back-button {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 2;
+  transition: background 0.2s ease;
+}
+
+.back-button:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 </style>
