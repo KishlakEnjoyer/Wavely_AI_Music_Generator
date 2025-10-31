@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { supabase } from '../lib/supabase.js'
+import { usePlayerStore } from '../lib/player'
 
 const promptText = ref('')
 const isHovered = ref(false)
@@ -17,6 +18,9 @@ const tracks = ref([])
 const loading = ref(true)
 const error = ref(null)
 const user = ref(null)
+
+// Плеер
+const playerStore = usePlayerStore()
 
 // Уведомление
 const notification = ref({
@@ -38,6 +42,50 @@ const formatDate = (dateStr) => {
   return `${d.getDate().toString().padStart(2, '0')}/${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getFullYear()}`
 }
 
+const playTrack = async (track) => {
+  if (!user.value) {
+    showNotification('Пожалуйста, войдите в аккаунт, чтобы слушать треки', 'info')
+    return
+  }
+
+  try {
+    let audioUrl = track.pathToFile;
+    
+    if (!audioUrl.startsWith('http')) {
+      const { data } = supabase.storage
+        .from('tracks')
+        .getPublicUrl(track.pathToFile)
+      
+      if (data?.publicUrl) {
+        audioUrl = data.publicUrl;
+      } else {
+        throw new Error('Не удалось получить URL трека')
+      }
+    }
+
+    console.log('Audio URL:', audioUrl);
+
+    const trackData = {
+      id: track.id,
+      title: track.title,
+      artist: track.author,
+      src: audioUrl,
+      liked: track.isLikedByUser
+    }
+    
+    playerStore.setTrack(trackData)
+    
+    setTimeout(() => {
+      playerStore.play()
+    }, 100)
+    
+    showNotification(`Воспроизведение: ${track.title}`, 'success')
+  } catch (error) {
+    console.error('Ошибка воспроизведения трека:', error)
+    showNotification('Не удалось воспроизвести трек', 'error')
+  }
+}
+
 onMounted(async () => {
   const { data: { user: currentUser } } = await supabase.auth.getUser()
   user.value = currentUser
@@ -45,7 +93,7 @@ onMounted(async () => {
   try {
     const { data, error: err } = await supabase
       .from('tracks')
-      .select('idTrack, titleTrack, durationTrack, dateCreation, authorId, publicTrack')
+      .select('idTrack, titleTrack, durationTrack, dateCreation, authorId, publicTrack, pathToFile')
       .eq('publicTrack', true)
       .order('dateCreation', { ascending: false })
 
@@ -96,7 +144,8 @@ onMounted(async () => {
       duration: formatDuration(track.durationTrack),
       date: formatDate(track.dateCreation),
       likesCount: likesMap[track.idTrack] || 0,
-      isLikedByUser: !!userLikes[track.idTrack]
+      isLikedByUser: !!userLikes[track.idTrack],
+      pathToFile: track.pathToFile
     }))
 
   } catch (e) {
@@ -286,7 +335,7 @@ const sortedAndFilteredTracks = computed(() => {
                     <!-- Загрузка треков и еще функция лайков -->
                     <div class="track-list">
                         <!-- Заглушка: 4 одинаковых трека -->
-                        <div v-for="(track, index) in sortedAndFilteredTracks" :key="track.id" class="track-item">
+                        <div v-for="(track, index) in sortedAndFilteredTracks" :key="track.id" class="track-item" @click="playTrack(track)" :class="{ 'active': playerStore.currentTrack?.id === track.id }">
                             <div class="track-left">
                                 <!-- Сердце -->
                                 <span @click.stop="toggleLike(index)" class="heart-icon" style="cursor: pointer;">
@@ -312,6 +361,12 @@ const sortedAndFilteredTracks = computed(() => {
                                 <span class="track-title">{{ track.title }}</span>
                                 <span class="separator">|</span>
                                 <span class="artist">{{ track.author }}</span>
+
+                                <span v-if="playerStore.currentTrack?.id === track.id && playerStore.isPlaying" class="playing-indicator">
+                                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                                    <path d="M3 2L13 8L3 14V2Z" fill="#26CEE6"/>
+                                  </svg>
+                                </span>
                             </div>
                             <div class="track-right">
                                 <div class="duration" style="display: flex;">
@@ -852,5 +907,36 @@ p {
 .submit-button:not(.active) {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+.track-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #1e1e1e;
+  padding: 12px 16px;
+  border-radius: 8px;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.track-item:hover {
+  background-color: #2a2a2a;
+}
+
+.track-item.active {
+  background: linear-gradient(90deg, rgba(38, 206, 230, 0.1) 0%, rgba(218, 39, 245, 0.05) 100%);
+  border: 1px solid rgba(38, 206, 230, 0.3);
+}
+
+.playing-indicator {
+  margin-left: 8px;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% { opacity: 0.6; }
+  50% { opacity: 1; }
+  100% { opacity: 0.6; }
 }
 </style>
