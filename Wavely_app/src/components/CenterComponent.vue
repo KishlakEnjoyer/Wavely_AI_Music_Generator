@@ -4,6 +4,8 @@ import { supabase } from '../lib/supabase.js'
 import { RouterLink } from 'vue-router'
 import musicApi from '../lib/musicApi.js'
 import GeneratedTrackModal from './GeneratedTrackModal.vue'
+import SquareAudioPlayer from './SquareAudioPlayer.vue'
+import MultiCheckboxSelect from './MultiCheckboxSelect.vue'
 
 const promptText = ref('')
 const isHovered = ref(false)
@@ -18,22 +20,18 @@ const submitPrompt = async () => {
     submitInProgress.value = true
     const genreLabel = selectedGenreGen.value ? genres.value.find(g => g.idGenre === selectedGenreGen.value)?.nameGenre : null
     const moodLabel = selectedMood.value ? moods.value.find(m => m.idMood === selectedMood.value)?.nameMood : null
-    const instrumentLabel = selectedInstrument.value ? instruments.value.find(i => i.idInstrument === selectedInstrument.value)?.nameInstrument : null
+    const instrumentLabels = (selectedInstruments.value || []).map(id => instruments.value.find(i => i.idInstrument === id)?.nameInstrument).filter(Boolean)
     const tags = []
     if (genreLabel) tags.push(`genre: ${genreLabel}`)
     if (moodLabel) tags.push(`mood: ${moodLabel}`)
-    if (instrumentLabel) tags.push(`instrument: ${instrumentLabel}`)
+    if (instrumentLabels.length) tags.push(`instruments: ${instrumentLabels.join(', ')}`)
     const composed = tags.length > 0 
       ? `${promptText.value.trim()} (${tags.join(', ')})`
       : `${promptText.value.trim()}`
     const { job_id } = await api.generateMusic(composed, selectedDuration.value, 'wav')
-    let done = false
-    while (!done) {
-      await new Promise(r => setTimeout(r, 1500))
-      const st = await api.checkStatus(job_id)
-      if (st.status === 'done') { done = true }
-      if (st.status === 'error') { throw new Error(st.error || 'Ошибка генерации') }
-    }
+    await api.pollUntilComplete(job_id, (st) => {
+      generationStatus.value = { state: st.status, message: st.status === 'queued' ? 'Ожидание в очереди' : st.status === 'processing' ? 'Идёт генерация...' : st.status }
+    }, 1500)
     const blob = await api.downloadFile(job_id)
     const ext = 'wav'
     const filePath = `${user.value.id}/${Date.now()}.${ext}`
@@ -45,8 +43,8 @@ const submitPrompt = async () => {
       .select('idTrack, titleTrack, publicTrack')
       .single()
     if (insErr) throw insErr
-    if (selectedInstrument.value) {
-      await supabase.from('track_instrument').insert({ idTrack: inserted.idTrack, idInstrument: selectedInstrument.value })
+    if (selectedInstruments.value && selectedInstruments.value.length) {
+      await supabase.from('track_instrument').insert(selectedInstruments.value.map(id => ({ idTrack: inserted.idTrack, idInstrument: id })))
     }
     const audioUrl = URL.createObjectURL(blob)
     generatedTrack.value = { id: inserted.idTrack, title: inserted.titleTrack, audioUrl, storagePath: filePath, publicTrack: inserted.publicTrack }
@@ -71,11 +69,12 @@ const selectedGenreGen = ref(null)
 const moods = ref([])
 const instruments = ref([])
 const selectedMood = ref(null)
-const selectedInstrument = ref(null)
+const selectedInstruments = ref([])
 const durations = ref([5,10,15,20,30,45,60,90,120])
 const selectedDuration = ref(15)
 const generatedTrack = ref(null)
 const isGeneratedModalOpen = ref(false)
+const generationStatus = ref({ state: 'idle', message: '' })
 
 // Supabase данные
 const tracks = ref([])
@@ -207,7 +206,7 @@ onMounted(async () => {
       .select('idInstrument, nameInstrument')
       .order('nameInstrument', { ascending: true })
     instruments.value = instrumentsData || []
-    selectedInstrument.value = null
+    selectedInstruments.value = []
   } catch {}
 
 })
@@ -330,20 +329,26 @@ const sortedAndFilteredTracks = computed(() => {
                         <option :value="null">Без настроения</option>
                         <option v-for="m in moods" :key="m.idMood" :value="m.idMood">{{ m.nameMood }}</option>
                       </select>
-                      <select v-model="selectedInstrument" class="prompt-select">
-                        <option :value="null">Без инструмента</option>
-                        <option v-for="i in instruments" :key="i.idInstrument" :value="i.idInstrument">{{ i.nameInstrument }}</option>
-                      </select>
+                      <MultiCheckboxSelect 
+                        v-model="selectedInstruments" 
+                        :options="instruments" 
+                        label-key="nameInstrument" 
+                        value-key="idInstrument" 
+                        placeholder="Инструменты" />
                       <select v-model="selectedDuration" class="prompt-select">
                         <option v-for="d in durations" :key="d" :value="d">{{ d }} сек</option>
                       </select>
+                    </div>
+                    <div class="generation-status" v-if="submitInProgress || generationStatus.state !== 'idle'">
+                      <span class="status-dot" :class="generationStatus.state"></span>
+                      <span class="status-text">{{ generationStatus.message }}</span>
                     </div>
                 </form>
             </div>
             <div v-if="generatedTrack" class="generated-track">
               <div class="generated-track-card">
                 <div class="generated-track-title">Сгенерированный трек</div>
-                <audio controls :src="generatedTrack.audioUrl" style="width:100%"></audio>
+                <SquareAudioPlayer :src="generatedTrack.audioUrl" :title="generatedTrack.title" />
                 <div class="generated-track-actions">
                   <button class="submit-button active" @click="isGeneratedModalOpen = true">Настроить публикацию</button>
                 </div>
@@ -1029,6 +1034,17 @@ p {
   border: 1px solid #00C4CC20;
   box-shadow: 0 0 0 2px rgba(0, 196, 204, 0.2);
 }
+
+.prompt-select[multiple] {
+  min-height: 80px;
+}
+
+.generation-status { display: flex; align-items: center; gap: 8px; margin-top: 8px; color: #ddd; font-size: 14px; }
+.status-dot { width: 10px; height: 10px; border-radius: 50%; background: #777; }
+.status-dot.queued { background: #f0ad4e; }
+.status-dot.processing { background: #31CEF4; animation: pulse 1s infinite ease-in-out; }
+.status-dot.done { background: #5cb85c; }
+@keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
 
 .generated-track { margin-top: 20px; display: flex; justify-content: center; }
 .generated-track-card { width: 590px; background-color: #0a0a0a80; border: 1px solid #00000027; border-radius: 16px; padding: 12px; }
