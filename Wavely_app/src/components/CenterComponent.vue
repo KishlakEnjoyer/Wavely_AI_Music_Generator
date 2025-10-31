@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase.js'
 import { RouterLink } from 'vue-router'
 import musicApi from '../lib/musicApi.js'
 import GeneratedTrackModal from './GeneratedTrackModal.vue'
+import MultiSelectDropdown from './MultiSelectDropdown.vue'
 
 const promptText = ref('')
 const isHovered = ref(false)
@@ -11,52 +12,108 @@ const isPressed = ref(false)
 const hasText = computed(() => promptText.value.trim().length > 0)
 const api = musicApi
 const submitInProgress = ref(false)
+const generationStatus = ref('')
+const generationProgress = ref(0)
 const submitPrompt = async () => {
   if (!hasText.value || submitInProgress.value) return
   if (!user.value) { showNotification('Пожалуйста, войдите, чтобы генерировать треки', 'info'); return }
   try {
     submitInProgress.value = true
+    generationStatus.value = 'Подготовка к генерации...'
+    generationProgress.value = 10
     const genreLabel = selectedGenreGen.value ? genres.value.find(g => g.idGenre === selectedGenreGen.value)?.nameGenre : null
     const moodLabel = selectedMood.value ? moods.value.find(m => m.idMood === selectedMood.value)?.nameMood : null
-    const instrumentLabel = selectedInstrument.value ? instruments.value.find(i => i.idInstrument === selectedInstrument.value)?.nameInstrument : null
+    const instrumentLabels = selectedInstruments.value.length > 0 
+      ? selectedInstruments.value.map(id => instruments.value.find(i => i.idInstrument === id)?.nameInstrument).filter(Boolean)
+      : []
     const tags = []
     if (genreLabel) tags.push(`genre: ${genreLabel}`)
     if (moodLabel) tags.push(`mood: ${moodLabel}`)
-    if (instrumentLabel) tags.push(`instrument: ${instrumentLabel}`)
+    if (instrumentLabels.length > 0) tags.push(`instruments: ${instrumentLabels.join(', ')}`)
     const composed = tags.length > 0 
       ? `${promptText.value.trim()} (${tags.join(', ')})`
       : `${promptText.value.trim()}`
+    
+    generationStatus.value = 'Отправка запроса на генерацию...'
+    generationProgress.value = 20
     const { job_id } = await api.generateMusic(composed, selectedDuration.value, 'wav')
+    
+    generationStatus.value = 'Генерация музыки в процессе...'
+    generationProgress.value = 30
     let done = false
+    let checkCount = 0
     while (!done) {
       await new Promise(r => setTimeout(r, 1500))
+      checkCount++
       const st = await api.checkStatus(job_id)
-      if (st.status === 'done') { done = true }
+      if (st.status === 'done') { 
+        done = true 
+        generationStatus.value = 'Генерация завершена!'
+        generationProgress.value = 70
+      }
       if (st.status === 'error') { throw new Error(st.error || 'Ошибка генерации') }
+      
+      // Обновляем прогресс во время ожидания
+      if (!done) {
+        generationProgress.value = Math.min(30 + (checkCount * 5), 65)
+        generationStatus.value = `Генерация музыки... (${Math.floor(checkCount * 1.5)} сек)`
+      }
     }
+    generationStatus.value = 'Загрузка сгенерированного файла...'
+    generationProgress.value = 75
     const blob = await api.downloadFile(job_id)
+    
+    generationStatus.value = 'Сохранение трека...'
+    generationProgress.value = 85
     const ext = 'wav'
-    const filePath = `${user.value.id}/${Date.now()}.${ext}`
+    const timestamp = Date.now()
+    const uuid = crypto.randomUUID()
+    const fileName = `track_${timestamp}_${uuid}.${ext}`
+    const filePath = fileName
     const { error: upErr } = await supabase.storage.from('tracks').upload(filePath, blob, { contentType: 'audio/wav' })
     if (upErr) throw upErr
+    
+    // Создаем полный URL для Supabase Storage
+    const { data: { publicUrl } } = supabase.storage.from('tracks').getPublicUrl(filePath)
+    
     const { data: inserted, error: insErr } = await supabase
       .from('tracks')
-      .insert([{ titleTrack: 'Untitled track', pathToFile: filePath, idGenre: selectedGenreGen.value || null, idMood: selectedMood.value || null, durationTrack: Math.round(selectedDuration.value), dateCreation: new Date().toISOString().slice(0, 10), publicTrack: false, authorId: user.value.id }])
+      .insert([{ titleTrack: 'Untitled track', pathToFile: publicUrl, idGenre: selectedGenreGen.value || null, idMood: selectedMood.value || null, durationTrack: Math.round(selectedDuration.value), dateCreation: new Date().toISOString().slice(0, 10), publicTrack: false, authorId: user.value.id }])
       .select('idTrack, titleTrack, publicTrack')
       .single()
     if (insErr) throw insErr
-    if (selectedInstrument.value) {
-      await supabase.from('track_instrument').insert({ idTrack: inserted.idTrack, idInstrument: selectedInstrument.value })
+    if (selectedInstruments.value.length > 0) {
+      const instrumentInserts = selectedInstruments.value.map(instrumentId => ({
+        idTrack: inserted.idTrack,
+        idInstrument: instrumentId
+      }))
+      await supabase.from('track_instrument').insert(instrumentInserts)
     }
+    generationStatus.value = 'Завершение...'
+    generationProgress.value = 95
     const audioUrl = URL.createObjectURL(blob)
     generatedTrack.value = { id: inserted.idTrack, title: inserted.titleTrack, audioUrl, storagePath: filePath, publicTrack: inserted.publicTrack }
+    
+    generationStatus.value = 'Готово!'
+    generationProgress.value = 100
     isGeneratedModalOpen.value = true
     showNotification('Трек сгенерирован', 'success')
+    
+    // Очищаем статус через небольшую задержку
+    setTimeout(() => {
+      generationStatus.value = ''
+      generationProgress.value = 0
+    }, 2000)
   } catch (e) {
     console.error(e)
     showNotification('Ошибка генерации или сохранения трека', 'error')
   } finally {
     submitInProgress.value = false
+    // Если произошла ошибка, очищаем статус
+    if (generationStatus.value && !generationStatus.value.includes('Готово')) {
+      generationStatus.value = ''
+      generationProgress.value = 0
+    }
   }
 }
 const handlePress = () => { if (!hasText.value) return; isPressed.value = true; setTimeout(() => isPressed.value = false, 300) }
@@ -71,7 +128,7 @@ const selectedGenreGen = ref(null)
 const moods = ref([])
 const instruments = ref([])
 const selectedMood = ref(null)
-const selectedInstrument = ref(null)
+const selectedInstruments = ref([])
 const durations = ref([5,10,15,20,30,45,60,90,120])
 const selectedDuration = ref(15)
 const generatedTrack = ref(null)
@@ -207,7 +264,7 @@ onMounted(async () => {
       .select('idInstrument, nameInstrument')
       .order('nameInstrument', { ascending: true })
     instruments.value = instrumentsData || []
-    selectedInstrument.value = null
+    selectedInstruments.value = []
   } catch {}
 
 })
@@ -287,6 +344,13 @@ const sortedAndFilteredTracks = computed(() => {
       return result.sort((a, b) => a.originalIndex - b.originalIndex)
   }
 })
+
+const instrumentsForSelect = computed(() => {
+  return instruments.value.map(instrument => ({
+    value: instrument.idInstrument,
+    label: instrument.nameInstrument
+  }))
+})
 </script>
 
 <template>
@@ -330,16 +394,32 @@ const sortedAndFilteredTracks = computed(() => {
                         <option :value="null">Без настроения</option>
                         <option v-for="m in moods" :key="m.idMood" :value="m.idMood">{{ m.nameMood }}</option>
                       </select>
-                      <select v-model="selectedInstrument" class="prompt-select">
-                        <option :value="null">Без инструмента</option>
-                        <option v-for="i in instruments" :key="i.idInstrument" :value="i.idInstrument">{{ i.nameInstrument }}</option>
-                      </select>
+                      <MultiSelectDropdown
+                        v-model="selectedInstruments"
+                        :options="instrumentsForSelect"
+                        placeholder="Без инструментов"
+                        value-key="value"
+                        label-key="label"
+                        class="prompt-select-multi"
+                      />
                       <select v-model="selectedDuration" class="prompt-select">
                         <option v-for="d in durations" :key="d" :value="d">{{ d }} сек</option>
                       </select>
                     </div>
                 </form>
             </div>
+            
+            <!-- Статус генерации -->
+            <div v-if="submitInProgress && generationStatus" class="generation-status">
+              <div class="status-card">
+                <div class="status-text">{{ generationStatus }}</div>
+                <div class="progress-bar">
+                  <div class="progress-fill" :style="{ width: generationProgress + '%' }"></div>
+                </div>
+                <div class="progress-text">{{ generationProgress }}%</div>
+              </div>
+            </div>
+            
             <div v-if="generatedTrack" class="generated-track">
               <div class="generated-track-card">
                 <div class="generated-track-title">Сгенерированный трек</div>
@@ -1028,6 +1108,56 @@ p {
 .prompt-select:hover {
   border: 1px solid #00C4CC20;
   box-shadow: 0 0 0 2px rgba(0, 196, 204, 0.2);
+}
+
+.prompt-select-multi {
+  flex: 0 0 220px;
+  width: 220px;
+}
+
+.generation-status {
+  margin-top: 20px;
+  display: flex;
+  justify-content: center;
+}
+
+.status-card {
+  width: 590px;
+  background-color: #0a0a0a80;
+  border: 1px solid #00000027;
+  border-radius: 16px;
+  padding: 16px;
+  text-align: center;
+}
+
+.status-text {
+  color: #f3f3f3;
+  font-weight: 600;
+  margin-bottom: 12px;
+  font-size: 16px;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background-color: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(-43deg, rgba(49, 206, 244, 1), rgba(232, 46, 204, 1));
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  color: #f3f3f3;
+  opacity: 0.8;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .generated-track { margin-top: 20px; display: flex; justify-content: center; }
