@@ -344,7 +344,7 @@ const sortedAndFilteredTracks = computed(() => {
 
                                 <span class="track-title">{{ track.title }}</span>
                                 <span class="separator">|</span>
-                                <RouterLink :to="`/user/${track.author}`" class="artist">{{ track.authorNick }}</RouterLink>            
+                                <RouterLink :to="`/profile/${track.author}`" class="artist">{{ track.authorNick }}</RouterLink>            
                             </div>
                             <div class="track-right">
                                 <div class="duration" style="display: flex;">
