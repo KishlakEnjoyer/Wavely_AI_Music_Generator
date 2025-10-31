@@ -853,7 +853,7 @@ const sortedAndFilteredTracks = computed(() => {
   transform: translate(-50%, -50%);
   width: 100%;
   text-align: center;
-  z-index: 2;
+  z-index: 0;
 }
 
 .welcome-text {
