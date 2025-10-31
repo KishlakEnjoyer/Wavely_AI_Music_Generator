@@ -2,12 +2,63 @@
 import { ref, computed, onMounted } from 'vue'
 import { supabase } from '../lib/supabase.js'
 import { RouterLink } from 'vue-router'
+import musicApi from '../lib/musicApi.js'
+import GeneratedTrackModal from './GeneratedTrackModal.vue'
 
 const promptText = ref('')
 const isHovered = ref(false)
 const isPressed = ref(false)
 const hasText = computed(() => promptText.value.trim().length > 0)
-const submitPrompt = () => { if (hasText.value) console.log('Промпт отправлен:', promptText.value) }
+const api = musicApi
+const submitInProgress = ref(false)
+const submitPrompt = async () => {
+  if (!hasText.value || submitInProgress.value) return
+  if (!user.value) { showNotification('Пожалуйста, войдите, чтобы генерировать треки', 'info'); return }
+  try {
+    submitInProgress.value = true
+    const genreLabel = selectedGenreGen.value ? genres.value.find(g => g.idGenre === selectedGenreGen.value)?.nameGenre : null
+    const moodLabel = selectedMood.value ? moods.value.find(m => m.idMood === selectedMood.value)?.nameMood : null
+    const instrumentLabel = selectedInstrument.value ? instruments.value.find(i => i.idInstrument === selectedInstrument.value)?.nameInstrument : null
+    const tags = []
+    if (genreLabel) tags.push(`genre: ${genreLabel}`)
+    if (moodLabel) tags.push(`mood: ${moodLabel}`)
+    if (instrumentLabel) tags.push(`instrument: ${instrumentLabel}`)
+    const composed = tags.length > 0 
+      ? `${promptText.value.trim()} (${tags.join(', ')})`
+      : `${promptText.value.trim()}`
+    const { job_id } = await api.generateMusic(composed, selectedDuration.value, 'wav')
+    let done = false
+    while (!done) {
+      await new Promise(r => setTimeout(r, 1500))
+      const st = await api.checkStatus(job_id)
+      if (st.status === 'done') { done = true }
+      if (st.status === 'error') { throw new Error(st.error || 'Ошибка генерации') }
+    }
+    const blob = await api.downloadFile(job_id)
+    const ext = 'wav'
+    const filePath = `${user.value.id}/${Date.now()}.${ext}`
+    const { error: upErr } = await supabase.storage.from('tracks').upload(filePath, blob, { contentType: 'audio/wav' })
+    if (upErr) throw upErr
+    const { data: inserted, error: insErr } = await supabase
+      .from('tracks')
+      .insert([{ titleTrack: 'Untitled track', pathToFile: filePath, idGenre: selectedGenreGen.value || null, idMood: selectedMood.value || null, durationTrack: Math.round(selectedDuration.value), dateCreation: new Date().toISOString().slice(0, 10), publicTrack: false, authorId: user.value.id }])
+      .select('idTrack, titleTrack, publicTrack')
+      .single()
+    if (insErr) throw insErr
+    if (selectedInstrument.value) {
+      await supabase.from('track_instrument').insert({ idTrack: inserted.idTrack, idInstrument: selectedInstrument.value })
+    }
+    const audioUrl = URL.createObjectURL(blob)
+    generatedTrack.value = { id: inserted.idTrack, title: inserted.titleTrack, audioUrl, storagePath: filePath, publicTrack: inserted.publicTrack }
+    isGeneratedModalOpen.value = true
+    showNotification('Трек сгенерирован', 'success')
+  } catch (e) {
+    console.error(e)
+    showNotification('Ошибка генерации или сохранения трека', 'error')
+  } finally {
+    submitInProgress.value = false
+  }
+}
 const handlePress = () => { if (!hasText.value) return; isPressed.value = true; setTimeout(() => isPressed.value = false, 300) }
 // Поиск
 const searchTerm = ref('')
@@ -16,6 +67,15 @@ const sortOption = ref('default') // 'default', 'date-new', 'date-old', 'likes-a
 // жанр
 const genres = ref([])
 const selectedGenre = ref('all')
+const selectedGenreGen = ref(null)
+const moods = ref([])
+const instruments = ref([])
+const selectedMood = ref(null)
+const selectedInstrument = ref(null)
+const durations = ref([5,10,15,20,30,45,60,90,120])
+const selectedDuration = ref(15)
+const generatedTrack = ref(null)
+const isGeneratedModalOpen = ref(false)
 
 // Supabase данные
 const tracks = ref([])
@@ -126,10 +186,29 @@ onMounted(async () => {
       console.error('Ошибка загрузки жанров:', genresErr)
     } else {
       genres.value = [{ idGenre: 'all', nameGenre: 'Все жанры' }, ...(genresData || [])]
+      selectedGenreGen.value = null
     }
   } catch (e) {
     console.error('Ошибка при загрузке жанров:', e)
   }
+
+  try {
+    const { data: moodsData } = await supabase
+      .from('moods')
+      .select('idMood, nameMood')
+      .order('nameMood', { ascending: true })
+    moods.value = moodsData || []
+    selectedMood.value = null
+  } catch {}
+
+  try {
+    const { data: instrumentsData } = await supabase
+      .from('instruments')
+      .select('idInstrument, nameInstrument')
+      .order('nameInstrument', { ascending: true })
+    instruments.value = instrumentsData || []
+    selectedInstrument.value = null
+  } catch {}
 
 })
 
@@ -227,7 +306,7 @@ const sortedAndFilteredTracks = computed(() => {
                             :class="{ 
                             'active': hasText, 
                             'hovered': hasText && isHovered,
-                            'pressed': isPressed
+                            'pressed': isPressed || submitInProgress
                             }"
                             @mouseenter="isHovered = true"
                             @mouseleave="isHovered = false"
@@ -242,7 +321,47 @@ const sortedAndFilteredTracks = computed(() => {
                             <div class="overlay"></div>
                         </button>
                     </div>
+                    <div class="prompt-selects">
+                      <select v-model="selectedGenreGen" class="prompt-select">
+                        <option :value="null">Без жанра</option>
+                        <option v-for="g in genres.filter(x => x.idGenre !== 'all')" :key="g.idGenre" :value="g.idGenre">{{ g.nameGenre }}</option>
+                      </select>
+                      <select v-model="selectedMood" class="prompt-select">
+                        <option :value="null">Без настроения</option>
+                        <option v-for="m in moods" :key="m.idMood" :value="m.idMood">{{ m.nameMood }}</option>
+                      </select>
+                      <select v-model="selectedInstrument" class="prompt-select">
+                        <option :value="null">Без инструмента</option>
+                        <option v-for="i in instruments" :key="i.idInstrument" :value="i.idInstrument">{{ i.nameInstrument }}</option>
+                      </select>
+                      <select v-model="selectedDuration" class="prompt-select">
+                        <option v-for="d in durations" :key="d" :value="d">{{ d }} сек</option>
+                      </select>
+                    </div>
                 </form>
+            </div>
+            <div v-if="generatedTrack" class="generated-track">
+              <div class="generated-track-card">
+                <div class="generated-track-title">Сгенерированный трек</div>
+                <audio controls :src="generatedTrack.audioUrl" style="width:100%"></audio>
+                <div class="generated-track-actions">
+                  <button class="submit-button active" @click="isGeneratedModalOpen = true">Настроить публикацию</button>
+                </div>
+              </div>
+              <GeneratedTrackModal 
+                v-if="isGeneratedModalOpen" 
+                :show="isGeneratedModalOpen" 
+                :track="generatedTrack" 
+                @close="isGeneratedModalOpen = false" 
+                @save="async ({ title, publish }) => { 
+                  try { 
+                    await supabase.from('tracks').update({ titleTrack: title, publicTrack: !!publish }).eq('idTrack', generatedTrack.id)
+                    generatedTrack.title = title
+                    generatedTrack.publicTrack = !!publish
+                    isGeneratedModalOpen = false
+                    showNotification('Сохранено', 'success')
+                  } catch { showNotification('Не удалось сохранить', 'error') } 
+                }" />
             </div>
         </div>
         <div class="logo-decor">
@@ -888,4 +1007,31 @@ p {
     opacity: 0.5;
     cursor: not-allowed;
 }
+
+.prompt-selects {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.prompt-select {
+  height: 46px;
+  padding: 10px 14px;
+  font-size: 14px;
+  color: rgb(220, 220, 220);
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  background-color: #04040460;
+  border-radius: 24px;
+  transition: all 0.3s ease;
+}
+
+.prompt-select:hover {
+  border: 1px solid #00C4CC20;
+  box-shadow: 0 0 0 2px rgba(0, 196, 204, 0.2);
+}
+
+.generated-track { margin-top: 20px; display: flex; justify-content: center; }
+.generated-track-card { width: 590px; background-color: #0a0a0a80; border: 1px solid #00000027; border-radius: 16px; padding: 12px; }
+.generated-track-title { color: #f3f3f3; opacity: 0.8; margin-bottom: 8px; font-weight: 600; }
+.generated-track-actions { margin-top: 12px; display: flex; justify-content: flex-end; }
 </style>
