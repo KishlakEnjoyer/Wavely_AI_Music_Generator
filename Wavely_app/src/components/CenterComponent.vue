@@ -76,9 +76,34 @@ const submitPrompt = async () => {
     // Создаем полный URL для Supabase Storage
     const { data: { publicUrl } } = supabase.storage.from('tracks').getPublicUrl(filePath)
     
+    // Обязательные поля: жанр, настроение и существующий профиль автора
+    const effectiveGenreId = selectedGenreGen.value ?? genres.value.find(g => g.idGenre !== 'all')?.idGenre
+    const effectiveMoodId = selectedMood.value ?? moods.value[0]?.idMood
+
+    if (!effectiveGenreId || !effectiveMoodId) {
+      showNotification('Пожалуйста, выберите жанр и настроение', 'error')
+      throw new Error('Missing required genre or mood for tracks insert')
+    }
+
+    // Убедимся, что профиль автора существует (FK tracks.authorId -> profiles.userid)
+    if (user.value?.id) {
+      const { data: profileRows, error: profileCheckErr } = await supabase
+        .from('profiles')
+        .select('userid')
+        .eq('userid', user.value.id)
+
+      if (!profileCheckErr && (!profileRows || profileRows.length === 0)) {
+        const nickname = user.value?.user_metadata?.display_name || user.value?.email?.split('@')[0] || 'User'
+        const { error: profileCreateErr } = await supabase
+          .from('profiles')
+          .insert([{ userid: user.value.id, nickname }])
+        if (profileCreateErr) throw profileCreateErr
+      }
+    }
+
     const { data: inserted, error: insErr } = await supabase
       .from('tracks')
-      .insert([{ titleTrack: 'Untitled track', pathToFile: publicUrl, idGenre: selectedGenreGen.value || null, idMood: selectedMood.value || null, durationTrack: Math.round(selectedDuration.value), dateCreation: new Date().toISOString().slice(0, 10), publicTrack: false, authorId: user.value.id }])
+      .insert([{ titleTrack: 'Untitled track', pathToFile: publicUrl, idGenre: effectiveGenreId, idMood: effectiveMoodId, durationTrack: Math.round(selectedDuration.value), dateCreation: new Date().toISOString().slice(0, 10), publicTrack: false, authorId: user.value.id }])
       .select('idTrack, titleTrack, publicTrack')
       .single()
     if (insErr) throw insErr
@@ -96,6 +121,8 @@ const submitPrompt = async () => {
     
     generationStatus.value = 'Готово!'
     generationProgress.value = 100
+    // Откроем модалку после обновления DOM, чтобы гарантировать наличие generatedTrack
+    await Promise.resolve()
     isGeneratedModalOpen.value = true
     showNotification('Трек сгенерирован', 'success')
     
@@ -243,7 +270,8 @@ onMounted(async () => {
       console.error('Ошибка загрузки жанров:', genresErr)
     } else {
       genres.value = [{ idGenre: 'all', nameGenre: 'Все жанры' }, ...(genresData || [])]
-      selectedGenreGen.value = null
+      // Значение по умолчанию: первый доступный жанр (кроме 'all'), чтобы удовлетворить NOT NULL
+      selectedGenreGen.value = genres.value.find(g => g.idGenre !== 'all')?.idGenre ?? null
     }
   } catch (e) {
     console.error('Ошибка при загрузке жанров:', e)
@@ -255,7 +283,8 @@ onMounted(async () => {
       .select('idMood, nameMood')
       .order('nameMood', { ascending: true })
     moods.value = moodsData || []
-    selectedMood.value = null
+    // Значение по умолчанию: первый доступный настрой
+    selectedMood.value = moods.value?.[0]?.idMood ?? null
   } catch {}
 
   try {
@@ -428,21 +457,23 @@ const instrumentsForSelect = computed(() => {
                   <button class="submit-button active" @click="isGeneratedModalOpen = true">Настроить публикацию</button>
                 </div>
               </div>
-              <GeneratedTrackModal 
-                v-if="isGeneratedModalOpen" 
-                :show="isGeneratedModalOpen" 
-                :track="generatedTrack" 
-                @close="isGeneratedModalOpen = false" 
-                @save="async ({ title, publish }) => { 
-                  try { 
-                    await supabase.from('tracks').update({ titleTrack: title, publicTrack: !!publish }).eq('idTrack', generatedTrack.id)
-                    generatedTrack.title = title
-                    generatedTrack.publicTrack = !!publish
-                    isGeneratedModalOpen = false
-                    showNotification('Сохранено', 'success')
-                  } catch { showNotification('Не удалось сохранить', 'error') } 
-                }" />
+              
             </div>
+            <!-- Модалка вынесена отдельно, чтобы не зависеть от вложенного v-if -->
+            <GeneratedTrackModal 
+              v-if="isGeneratedModalOpen && generatedTrack" 
+              :show="isGeneratedModalOpen" 
+              :track="generatedTrack" 
+              @close="isGeneratedModalOpen = false" 
+              @save="async ({ title, publish }) => { 
+                try { 
+                  await supabase.from('tracks').update({ titleTrack: title, publicTrack: !!publish }).eq('idTrack', generatedTrack.id)
+                  generatedTrack.title = title
+                  generatedTrack.publicTrack = !!publish
+                  isGeneratedModalOpen = false
+                  showNotification('Сохранено', 'success')
+                } catch { showNotification('Не удалось сохранить', 'error') } 
+              }" />
         </div>
         <div class="logo-decor">
             <svg width="168" height="39" viewBox="0 0 168 39" fill="none" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
