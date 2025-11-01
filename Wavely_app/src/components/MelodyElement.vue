@@ -1,4 +1,42 @@
 <!-- src/components/MelodyElement.vue -->
+<script setup>
+import { defineProps, defineEmits, toRefs } from "vue";
+import { RouterLink } from "vue-router";
+
+const props = defineProps({
+  track: {
+    type: Object,
+    required: true,
+  },
+  showArtistLink: {
+    type: Boolean,
+    default: true,
+  },
+  showMore: {
+    type: Boolean,
+    default: false,
+  },
+  isPlaying: {
+    type: Boolean,
+    default: false,
+  },
+});
+
+// toRefs сохраняет реактивность при "распаковке" props
+const { track, showArtistLink, showMore, isPlaying } = toRefs(props);
+
+const emit = defineEmits(["like", "play"]);
+
+const onLike = () => {
+  emit("like");
+};
+
+const onPlay = () => {
+  emit("play");
+};
+</script>
+
+
 <template>
   <div 
     class="track-item" 
@@ -144,44 +182,37 @@
         </svg>
         <span> {{ track.likesCount }}</span>
       </div>
-      <span v-if="showMore" class="more" style="font-weight: bold">···</span>
+      <div class="track-right">
+      <!-- ... остальной код без изменений ... -->
+      <!-- Изменяем условие отображения кнопки "ещё" -->
+      <span
+        v-if="showMore && showThreeDots"
+        ref="moreButtonRef"
+        class="more"
+        style="font-weight: bold; cursor: pointer"
+        @click.stop="toggleContextMenu"
+      >
+        ···
+      </span>
+
+      <!-- Контекстное меню -->
+      <div
+        v-if="isContextMenuOpen"
+        ref="contextMenuRef"
+        class="context-menu"
+        @click.stop
+      >
+        <button
+          class="context-menu-item"
+          @click="togglePublicStatus"
+        >
+          {{ track.publicTrack ? 'Сделать приватным' : 'Сделать публичным' }}
+        </button>
+      </div>
+    </div>
     </div>
   </div>
 </template>
-
-<script setup>
-import { defineProps, defineEmits } from "vue";
-import { RouterLink } from "vue-router";
-
-const props = defineProps({
-  track: {
-    type: Object,
-    required: true,
-  },
-  showArtistLink: {
-    type: Boolean,
-    default: true,
-  },
-  showMore: {
-    type: Boolean,
-    default: false,
-  },
-  isPlaying: {
-    type: Boolean,
-    default: false,
-  },
-});
-
-const emit = defineEmits(["like", "play"]);
-
-const onLike = () => {
-  emit("like");
-};
-
-const onPlay = () => {
-  emit("play");
-};
-</script>
 
 <style scoped>
 .track-item {
@@ -217,6 +248,8 @@ const onPlay = () => {
   gap: 8px;
   font-size: 14px;
   color: #bbb;
+    position: relative; /* <-- ДОБАВЬТЕ ЭТУ СТРОКУ */
+
 }
 
 .track-title {
@@ -285,5 +318,37 @@ const onPlay = () => {
   0% { opacity: 0.6; }
   50% { opacity: 1; }
   100% { opacity: 0.6; }
+}
+
+/* Стили для контекстного меню */
+.context-menu {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  background-color: #2a2a2a;
+  border: 1px solid #444;
+  border-radius: 4px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+  z-index: 1000;
+  min-width: 180px;
+  overflow: hidden;
+}
+
+.context-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  background: none;
+  border: none;
+  color: #f3f3f3;
+  text-align: left;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.context-menu-item:hover {
+  background-color: #3a3a3a;
 }
 </style>
