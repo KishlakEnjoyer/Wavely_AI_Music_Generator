@@ -782,7 +782,6 @@ const instrumentsForSelect = computed(() => {
           <!-- Загрузка треков и еще функция лайков -->
           <div class="track-list">
             <!-- Заглушка: 4 одинаковых трека -->
-<<<<<<< HEAD
               <MelodyElement
                 v-for="track in sortedAndFilteredTracks.slice(0, 8)"
                 :key="track.id"
@@ -793,17 +792,6 @@ const instrumentsForSelect = computed(() => {
                 @play="() => playTrack(track)"
                 @like="() => toggleLike(track.id)"
               />
-=======
-            <MelodyElement
-              v-for="track in sortedAndFilteredTracks.slice(0, 8)"
-              :key="track.id"
-              :track="track"
-              :show-artist-link="true"
-              :show-more="true"
-              :show-three-dots="false" 
-              @like="() => toggleLike(track.id)"
-            />
->>>>>>> c2985ec13f4fdbe105f22be286b592f06aa94429
           </div>
         </div>
       </div>

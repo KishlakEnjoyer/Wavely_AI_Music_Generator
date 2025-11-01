@@ -143,6 +143,7 @@ async function loadOwnProfileData() {
     dateCreation: track.dateCreation,
     likesCount: likesMap[track.idTrack] || 0,
     isLikedByUser: !!userLikes[track.idTrack],
+    pathToFile: track.pathToFile
   };
 });
     stats.value.totalTracks = tracks.value.length;
@@ -432,6 +433,79 @@ const showNotification = (message, type = "info") => {
     notification.value.show = false;
   }, 3000);
 };
+
+const playTrack = async (track) => {
+  if (!user.value) {
+    showNotification('Пожалуйста, войдите в аккаунт, чтобы слушать треки', 'info')
+    return
+  }
+
+  try {
+    let audioUrl = track.pathToFile
+
+    if (!audioUrl.startsWith('http')) {
+      const { data } = supabase.storage.from('tracks').getPublicUrl(track.pathToFile)
+      if (data?.publicUrl) audioUrl = data.publicUrl
+      else throw new Error('Не удалось получить URL трека')
+    }
+
+    console.log('🔗 Audio URL:', audioUrl)
+
+    // Используем объект из tracksStore — это ключ к синхронизации
+    let storeTrack = tracksStore.getTrackById(track.id)
+
+    if (!storeTrack) {
+      storeTrack = {
+        id: track.id,
+        title: track.title,
+        author: track.author,
+        authorNick: track.authorNick,
+        duration: track.duration,
+        date: track.date,
+        likesCount: track.likesCount ?? 0,
+        isLikedByUser: track.isLikedByUser ?? false,
+        pathToFile: track.pathToFile
+      }
+      // добавляем в tracksStore
+      tracksStore.tracks.push(storeTrack)
+    }
+
+    // Устанавливаем src прямо в объект (используем ссылку)
+    storeTrack.src = audioUrl
+
+    // Передаём ссылку на объект в playerStore (теперь плеер и список — одна и та же ссылка)
+    await playerStore.setTrack(storeTrack)
+
+    // Если audioElement ещё не привязан — попробуем найти его в DOM (короткий polling)
+    if (!playerStore.audioElement) {
+      await new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Audio element не найден в DOM')), 3000)
+        const interval = setInterval(() => {
+          const el = document.querySelector('audio')
+          if (el) {
+            clearTimeout(timeout)
+            clearInterval(interval)
+            playerStore.setAudioElement(el)
+            resolve()
+          }
+        }, 50)
+      })
+    }
+
+    // Пытаемся воспроизвести
+    try {
+      await playerStore.play()
+      showNotification(`Воспроизведение: ${storeTrack.title}`, 'success')
+    } catch (error) {
+      console.error('❌ Playback error:', error)
+      showNotification(`Ошибка воспроизведения: ${error.message}`, 'error')
+    }
+  } catch (error) {
+    console.error('❌ Track setup error:', error)
+    showNotification('Не удалось воспроизвести трек', 'error')
+  }
+}
+
 </script>
 
 <template>
@@ -483,6 +557,7 @@ const showNotification = (message, type = "info") => {
             :show-more="true"
             :show-three-dots="isOwnProfile" 
             @like="() => toggleLike(track.id)"
+            @play="() => playTrack(track)"
             @public-status-changed="handlePublicStatusChanged"
           />
         </div>

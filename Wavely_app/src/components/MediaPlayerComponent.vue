@@ -183,6 +183,8 @@ const downloadTrack = () => {
     if (!playerStore.currentTrack?.src) return
     const link = document.createElement('a')
     link.href = playerStore.currentTrack.src
+    link.target = '_blank'
+    link.rel = 'noopener noreferrer'
     link.download = playerStore.currentTrack.title || 'track.mp3'
     link.click()
 }
@@ -472,7 +474,7 @@ watch(() => playerStore.isPlaying, (playing) => {
     left: 0;
     right: 0;
     z-index: 1000;
-    background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+    background: linear-gradient(135deg, #1a1a1ad5 0%, #2d2d2dc7 100%);
     border-top: 1px solid rgba(255, 255, 255, 0.1);
     backdrop-filter: blur(10px);
 }

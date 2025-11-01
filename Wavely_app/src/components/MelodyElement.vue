@@ -1,7 +1,8 @@
 <!-- src/components/MelodyElement.vue -->
 <script setup>
-import { defineProps, defineEmits, toRefs } from "vue";
+import { defineProps, defineEmits, ref, onMounted, onUnmounted, computed } from "vue";
 import { RouterLink } from "vue-router";
+import { supabase } from "@/lib/supabase";
 
 const props = defineProps({
   track: {
@@ -23,9 +24,17 @@ const props = defineProps({
 });
 
 // toRefs сохраняет реактивность при "распаковке" props
-const { track, showArtistLink, showMore, isPlaying } = toRefs(props);
+const localIsLiked = computed(() => props.track?.isLikedByUser || false); // <-- Используем computed для безопасности
+const localLikesCount = computed(() => props.track?.likesCount || 0); // <-- Используем computed для безопасности
+const localPublicTrack = computed(() => props.track?.publicTrack);
 
-const emit = defineEmits(["like", "play"]);
+const isContextMenuOpen = ref(false);
+const moreButtonRef = ref(null);
+const contextMenuRef = ref(null);
+
+
+
+const emit = defineEmits(["public-status-changed", "notification"]); // <-- Добавлены события
 
 const onLike = () => {
   emit("like");
@@ -34,6 +43,25 @@ const onLike = () => {
 const onPlay = () => {
   emit("play");
 };
+
+const closeContextMenu = (event) => {
+  if (
+    isContextMenuOpen.value &&
+    moreButtonRef.value &&
+    !moreButtonRef.value.contains(event.target) &&
+    contextMenuRef.value &&
+    !contextMenuRef.value.contains(event.target)
+  ) {
+    isContextMenuOpen.value = false;
+  }
+};
+
+const toggleContextMenu = () => {
+  isContextMenuOpen.value = !isContextMenuOpen.value;
+};
+
+
+
 </script>
 
 
