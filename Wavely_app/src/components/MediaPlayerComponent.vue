@@ -1,13 +1,24 @@
 <script setup>
-import { ref, watch, onMounted, computed } from 'vue'
-import { usePlayerStore } from '../lib/player'
+import { ref, watch, onMounted, computed, nextTick } from 'vue'
+import { usePlayerStore } from '../lib/player.js'
+import { useTracksStore } from '../lib/tracks.js'
 import { supabase } from '../lib/supabase.js'
 
 const playerStore = usePlayerStore()
+const tracksStore = useTracksStore()
 const audio = ref(null)
 const user = ref(null)
 const showAuthRequiredModal = ref(false)
 const playError = ref('')
+const isLiking = ref(false)
+
+// вычисляемое поле для состояния лайка (учитывает обе названия поля)
+const currentLiked = computed(() => {
+  const ct = playerStore.currentTrack
+  if (!ct) return false
+  // сначала предпочитаем isLikedByUser (новая схема), иначе liked (старые места)
+  return Boolean(ct.isLikedByUser ?? ct.liked)
+})
 
 const isUserAuthenticated = computed(() => !!user.value) 
 
@@ -15,8 +26,30 @@ onMounted(async () => {
     await checkAuth()
     setupAuthListener()
 
+    console.log('🎵 MediaPlayerComponent mounted');
+    
+    // Даем время на рендеринг DOM
+    await nextTick();
+    
+    console.log('🔍 Audio element after nextTick:', audio.value);
+    
     if (audio.value) {
+        console.log('🔧 Setting audio element in player');
         playerStore.setAudioElement(audio.value);
+        
+        // Проверяем состояние audio элемента
+        debugAudio();
+    } else {
+        console.error('❌ Audio element is null in MediaPlayerComponent!');
+        // Попробуем найти audio элемент в DOM
+        setTimeout(() => {
+            const audioElement = document.querySelector('audio');
+            console.log('🔍 Audio element from DOM query after timeout:', audioElement);
+            if (audioElement) {
+                console.log('🔄 Re-setting audio element');
+                playerStore.setAudioElement(audioElement);
+            }
+        }, 1000);
     }
 });
 
@@ -158,39 +191,65 @@ const showNotification = (message, type = 'info') => {
   console.log(`${type}: ${message}`);
 }
 
-const toggleLike = async (index) => {
-  if (!user.value) {
-    showNotification('Пожалуйста, войдите в аккаунт, чтобы ставить лайки', 'info')
+const toggleLike = async () => {
+  const current = playerStore.currentTrack
+  if (!current) {
+    showNotification('Трек не выбран', 'info')
     return
   }
-
-  const track = tracks.value[index]
-  const isNowLiked = !track.isLikedByUser
+  if (!user.value) {
+    showAuthRequiredModal.value = true
+    return
+  }
+  if (isLiking.value) return
+  isLiking.value = true
 
   try {
-    if (isNowLiked) {
-      await supabase.from('likes').insert({
-        idTrack: track.id,
-        authorId: user.value.id
-      })
-      tracks.value[index].likesCount += 1
-    } else {
-      await supabase
-        .from('likes')
-        .delete()
-        .match({ idTrack: track.id, authorId: user.value.id })
-      tracks.value[index].likesCount -= 1
+    // используем tracksStore для согласованности и получения актуального likesCount
+    const { trackId, isNowLiked, likesCount } = await tracksStore.toggleLike(current.id, user.value.id)
+
+    // Синхронизируем в playerStore.currentTrack оба поля (на случай, если где-то используется liked)
+    if (playerStore.currentTrack && playerStore.currentTrack.id === trackId) {
+      // обновляем оба возможных имени поля
+      playerStore.currentTrack.isLikedByUser = isNowLiked
+      playerStore.currentTrack.liked = isNowLiked
+
+      // обновляем количество лайков (если оно есть)
+      playerStore.currentTrack.likesCount = likesCount
     }
 
-    tracks.value[index].isLikedByUser = isNowLiked
-    // Опционально: показать уведомление об успехе
-    // showNotification(isNowLiked ? 'Лайк добавлен!' : 'Лайк убран', 'success')
-
+    showNotification(isNowLiked ? 'Лайк добавлен' : 'Лайк убран', 'success')
   } catch (e) {
-    console.error('Ошибка при лайке:', e)
-    showNotification('Не удалось обновить лайк', 'error') // ✅ Исправлено: было alert
+    console.error('Ошибка при лайке (player):', e)
+    showNotification('Не удалось обновить лайк', 'error')
+  } finally {
+    isLiking.value = false
   }
 }
+
+
+
+watch(
+  () => tracksStore.tracks,
+  () => {
+    const ct = playerStore.currentTrack
+    if (!ct) return
+    const updated = tracksStore.getTrackById(ct.id)
+    if (!updated) return
+    if (updated !== ct) {
+      // заменяем ссылку на тот же объект из tracksStore
+      playerStore.currentTrack = updated
+    } else {
+      // на всякий случай синхронизируем поля
+      playerStore.currentTrack.isLikedByUser = updated.isLikedByUser
+      playerStore.currentTrack.liked = updated.liked ?? updated.isLikedByUser
+      playerStore.currentTrack.likesCount = updated.likesCount
+    }
+  },
+  { deep: true }
+)
+
+
 
 
 watch(() => playerStore.currentTime, (time) => {
@@ -223,20 +282,20 @@ watch(() => playerStore.isPlaying, (playing) => {
 </script>
 
 <template>
+    <audio
+  ref="audio"
+  crossorigin="anonymous"
+  preload="metadata"
+  @timeupdate="onTimeUpdate"
+  @loadedmetadata="onLoadedMetadata"
+  @loadstart="onLoadStart"
+  @canplay="onCanPlay"
+  @ended="onEnded"
+  @error="onError"
+></audio>
+
     <div v-if="playerStore.isVisible" class="media-player-fixed">
         <div class="player-container">
-            <audio 
-                ref="audio" 
-                :src="playerStore.currentTrack?.src" 
-                @timeupdate="onTimeUpdate"
-                @loadedmetadata="onLoadedMetadata" 
-                @loadstart="onLoadStart"
-                @canplay="onCanPlay"
-                @ended="onEnded" 
-                @error="onError" 
-                preload="metadata"
-                :loop="playerStore.loop" 
-            />
 
             <div v-if="playerStore.isLoading" class="loading-indicator">
                 Загрузка трека...
@@ -267,7 +326,7 @@ watch(() => playerStore.isPlaying, (playing) => {
                         <p class="track-title">{{ playerStore.currentTrack?.title || 'Выберите трек' }}</p>
                         <p class="track-artist">{{ playerStore.currentTrack?.artist || 'Неизвестный исполнитель' }}</p>
                     </div>
-                    <button @click.stop="toggleLike(index)" class="like-btn" :class="{ liked: playerStore.currentTrack?.liked }">
+                    <button @click.stop="toggleLike" class="like-btn" :class="{ liked: currentLiked }">
                         <svg class="heart-logo" v-if="!playerStore.currentTrack?.liked" width="23" height="23"
                             viewBox="0 0 30 27" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path

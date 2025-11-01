@@ -35,25 +35,24 @@ export const usePlayerStore = defineStore('player', {
       }
     },
 
+    // в defineStore actions
     async setTrack(trackData) {
-      console.log('Setting track:', trackData); // Добавьте для отладки
-      
-      if (this.audioElement) {
-        this.audioElement.pause();
-        this.audioElement.currentTime = 0;
-      }
-      
-      this.currentTrack = trackData;
-      this.currentTime = 0;
-      this.isPlaying = false;
-      this.isLoading = true;
-      this.isVisible = true; 
-      
-      if (this.audioElement && trackData.src) {
-        try {
+      try {
+        // Ожидаем: trackData должен быть ссылкой на объект из tracksStore.
+        // НЕ клонируем объект, просто присваиваем ссылку.
+        if (!trackData) throw new Error('trackData не задан');
+
+        this.currentTrack = trackData; // <-- ссылка, а не копия
+        this.currentTime = 0;
+        this.isPlaying = false;
+        this.isLoading = true;
+        this.isVisible = true;
+
+        if (this.audioElement && trackData.src) {
+          // Устанавливаем src у audioElement (не меняем объект trackData.src)
           this.audioElement.src = trackData.src;
           this.audioElement.currentTime = 0;
-          
+
           await new Promise((resolve, reject) => {
             const onCanPlay = () => {
               this.audioElement.removeEventListener('canplay', onCanPlay);
@@ -61,30 +60,28 @@ export const usePlayerStore = defineStore('player', {
               this.isLoading = false;
               resolve();
             };
-            
+
             const onError = (e) => {
               this.audioElement.removeEventListener('canplay', onCanPlay);
               this.audioElement.removeEventListener('error', onError);
               this.isLoading = false;
               reject(e);
             };
-            
+
             this.audioElement.addEventListener('canplay', onCanPlay);
             this.audioElement.addEventListener('error', onError);
-            
+
+            // load и canplay будут обработаны
             this.audioElement.load();
           });
-          
-        } catch (error) {
-          this.isLoading = false;
-          console.error('Error loading track:', error);
-          throw error;
         }
-      } else {
+      } catch (error) {
         this.isLoading = false;
-        console.warn('Audio element not ready or no track source');
+        console.error('Error loading track:', error);
+        throw error;
       }
     },
+
     
     hidePlayer() {
       this.isVisible = false;
@@ -101,20 +98,21 @@ export const usePlayerStore = defineStore('player', {
     },
 
     async play() {
-      console.log('Play called, currentTrack:', this.currentTrack, 'audioElement:', this.audioElement); // Отладка
-      
-      if (!this.currentTrack) {
+      if (!this.currentTrack || !this.audioElement) {
         throw new Error('Трек не выбран');
       }
       
-      if (!this.audioElement) {
-        throw new Error('Аудио элемент не готов');
-      }
-      
       try {
-        // Если трек еще загружается, ждем
+          if (!this.audioElement && typeof document !== 'undefined') {
+    const el = document.querySelector('audio');
+    if (el) this.setAudioElement(el);
+  }
+
+  if (!this.currentTrack || !this.audioElement) {
+    throw new Error('Трек не выбран или audio элемент не инициализирован. Вызови playerStore.setAudioElement(audio).');
+  }
+
         if (this.isLoading) {
-          console.log('Track is loading, waiting...');
           await new Promise(resolve => {
             const checkLoading = setInterval(() => {
               if (!this.isLoading) {
@@ -125,10 +123,8 @@ export const usePlayerStore = defineStore('player', {
           });
         }
         
-        console.log('Attempting to play...');
         await this.audioElement.play();
         this.isPlaying = true;
-        console.log('Playback started successfully');
       } catch (error) {
         console.error('Error playing audio:', error);
         this.isPlaying = false;
