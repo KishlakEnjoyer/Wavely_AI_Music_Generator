@@ -70,7 +70,7 @@ const submitPrompt = async () => {
     generationProgress.value = 85
     const ext = 'wav'
     const timestamp = Date.now()
-    const uuid = crypto.randomUUID()
+    const uuid = generateUUID();
     const fileName = `track_${timestamp}_${uuid}.${ext}`
     const filePath = fileName
     const { error: upErr } = await supabase.storage.from('tracks').upload(filePath, blob, { contentType: 'audio/wav' })
@@ -269,6 +269,22 @@ const playTrack = async (track) => {
   }
 }
 
+
+const generateUUID = () => {
+  // Попробуем использовать нативный метод
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  // Если нативный метод недоступен, используем ручную генерацию
+  const getRandomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+  const s4 = () => getRandomInt(0, 0xffff).toString(16);
+  const s8 = () => `${s4()}${s4()}`;
+  const s12 = () => `${s4()}${s4()}${s4()}`;
+
+  return `${s8()}-${s4()}-${s4()}-${s4()}-${s12()}`;
+};
 
 
 // Функция для получения индекса трека в оригинальном массиве
