@@ -13,13 +13,6 @@ const currentUser = ref(null)
 let authListener
 
 onMounted(() => {
-  supabase.auth.getUser().then(({ data, error }) => {
-    if (error) {
-      console.error('Ошибка получения пользователя:', error)
-    } else {
-      currentUser.value = data.user
-    }
-  })
 
   authListener = supabase.auth.onAuthStateChange((event, session) => {
     currentUser.value = session?.user ?? null
@@ -54,8 +47,13 @@ const onRegister = (data) => {
 }
 
 const handleLogout = async () => {
-  await supabase.auth.signOut()
-  currentUser.value = null
+  const { error } = await supabase.auth.signOut()
+  if (error) {
+    console.error('Ошибка при выходе:', error.message)
+    // Можно показать уведомление
+  }
+  window.location.reload()
+
 }
 </script>
 

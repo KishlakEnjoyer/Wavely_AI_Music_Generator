@@ -47,12 +47,9 @@ const handleLogin = async () => {
     // Tолько при успехе
     emit('login', { user: data.user, session: data.session })
 
-    // "Запомнить меня"
-    if (rememberMe.value) {
-      // Supabase сам сохраняет сессию в localStorage по умолчанию
-      // Но можно явно указать политику:
-      await supabase.auth.setSession({ access_token, refresh_token })
-    }
+    // ✅ Обновляем страницу
+    window.location.reload()
+
     alert("Вход выполнен! Здравствуйте, " + data.user.user_metadata.display_name)
     close()
 
@@ -118,10 +115,6 @@ const onOverlayClick = (e) => {
 
         <!-- Options -->
         <div class="options">
-          <label class="remember-me">
-            <input type="checkbox" v-model="rememberMe" />
-            Запомнить меня
-          </label>
           <a href="#" class="forgot-password">Забыли пароль?</a>
         </div>
 
