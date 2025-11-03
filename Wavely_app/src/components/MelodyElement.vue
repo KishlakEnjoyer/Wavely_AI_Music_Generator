@@ -3,6 +3,7 @@
 import { defineProps, defineEmits, ref, onMounted, onUnmounted, computed } from "vue";
 import { RouterLink } from "vue-router";
 import { supabase } from "@/lib/supabase";
+import EditTrackModal from '@/components/EditTrackModal.vue'; // Импортируем компонент
 
 const props = defineProps({
   track: {
@@ -32,9 +33,10 @@ const isContextMenuOpen = ref(false);
 const moreButtonRef = ref(null);
 const contextMenuRef = ref(null);
 
+// --- Новое состояние для модального окна ---
+const isEditModalOpen = ref(false);
 
-
-const emit = defineEmits(["public-status-changed", "notification"]); // <-- Добавлены события
+const emit = defineEmits(["public-status-changed", "notification", "track-title-updated"]); // <-- Добавлены события
 
 const onLike = () => {
   emit("like");
@@ -74,9 +76,6 @@ const togglePublicStatus = async () => {
       throw error;
     }
 
-    // Обновляем локальное значение, чтобы интерфейс обновился сразу
-    // Это работает, потому что localPublicTrack - это computed, который зависит от props.track.publicTrack
-    // Мы не можем его напрямую изменить, но можем передать обновленные данные родителю
     emit('public-status-changed', {
       trackId: props.track.id,
       newPublicStatus: newPublicStatus
@@ -101,8 +100,56 @@ const togglePublicStatus = async () => {
   }
 };
 
-</script>
 
+
+// --- Методы для модального окна редактирования ---
+const openEditModal = () => {
+  isEditModalOpen.value = true;
+  isContextMenuOpen.value = false; // Закрываем контекстное меню при открытии модального окна
+};
+
+const closeEditModal = () => {
+  isEditModalOpen.value = false;
+};
+
+const saveTrackTitle = async ({ newTitle }) => {
+  if (newTitle === props.track.title) {
+    closeEditModal();
+    return; // Нет изменений
+  }
+
+  try {
+    const { error } = await supabase
+      .from('tracks')
+      .update({ titleTrack: newTitle })
+      .eq('idTrack', props.track.id);
+
+    if (error) {
+      throw error;
+    }
+
+    emit('track-title-updated', {
+      trackId: props.track.id,
+      newTitle: newTitle
+    });
+
+    closeEditModal();
+
+    emit('notification', {
+      type: 'success',
+      message: 'Название трека обновлено'
+    });
+
+  } catch (error) {
+    console.error('Ошибка при изменении названия трека:', error);
+    emit('notification', {
+      type: 'error',
+      message: 'Не удалось изменить название трека'
+    });
+  }
+};
+
+</script>
 
 <template>
   <div 
@@ -275,10 +322,24 @@ const togglePublicStatus = async () => {
         >
           {{ track.publicTrack ? 'Сделать приватным' : 'Сделать публичным' }}
         </button>
+        <button
+          class="context-menu-item"
+          @click="openEditModal"
+        >
+          Редактировать трек
+        </button>
       </div>
     </div>
     </div>
   </div>
+
+  <!-- Модальное окно редактирования трека -->
+  <EditTrackModal
+    :is-open="isEditModalOpen"
+    :track-title="track.title"
+    @close="closeEditModal"
+    @save="saveTrackTitle"
+  />
 </template>
 
 <style scoped>

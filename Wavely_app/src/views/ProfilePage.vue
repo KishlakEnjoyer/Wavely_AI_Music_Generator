@@ -141,7 +141,8 @@ async function loadOwnProfileData() {
     dateCreation: track.dateCreation,
     likesCount: likesMap[track.idTrack] || 0,
     isLikedByUser: !!userLikes[track.idTrack],
-    pathToFile: track.pathToFile
+    pathToFile: track.pathToFile,
+    publicTrack: track.publicTrack
   };
 });
     stats.value.totalTracks = tracks.value.length;
@@ -159,7 +160,7 @@ async function loadOwnProfileData() {
     const trackIds = givenLikes.map((like) => like.idTrack);
     const { data: likedTrackDetails } = await supabase
       .from("tracks")
-      .select("idTrack, titleTrack, durationTrack, dateCreation, authorId, profiles!inner(nickname)")
+      .select("idTrack, titleTrack, durationTrack, dateCreation, authorId, profiles!inner(nickname), publicTrack")
       .in("idTrack", trackIds)
       .order("dateCreation", { ascending: false });
 
@@ -202,6 +203,8 @@ async function loadOwnProfileData() {
         dateCreation: track.dateCreation,
         likesCount: likedTrackLikesMap[track.idTrack] || 0,
         isLikedByUser: !!likedUserLikes[track.idTrack],
+        publicTrack: track.publicTrack,
+        pathToFile: track.pathToFile
       }));
     }
   }
@@ -286,6 +289,7 @@ async function loadOtherUserProfileData() {
     dateCreation: track.dateCreation,
     likesCount: likesMap[track.idTrack] || 0,
     isLikedByUser: !!userLikes[track.idTrack],
+    pathToFile: track.pathToFile,
   }));
 
   stats.value.totalTracks = tracks.value.length;
@@ -488,7 +492,14 @@ const playTrack = async (track) => {
 const handlePublicStatusChanged = ({ trackId, newPublicStatus }) => {
   const track = tracks.value.find(t => t.id === trackId);
   if (track) {
-    track.publicTrack = newPublicStatus; // Это обновит props.track в MelodyElement
+    track.publicTrack = newPublicStatus; 
+  }
+};
+
+const handleTrackTitleUpdated = ({ trackId, newTitle }) => {
+  const track = tracks.value.find(t => t.id === trackId);
+  if (track && newTitle !== undefined) {
+    track.title = newTitle; 
   }
 };
 
@@ -530,11 +541,9 @@ const handlePublicStatusChanged = ({ trackId, newPublicStatus }) => {
         <p v-if="isOwnProfile">● Кол-во поставленных лайков: {{ stats.givenLikes }}</p>
       </div>
 
-      <!-- Ваши / Публичные мелодии -->
       <h2 class="section-title">{{ isOwnProfile ? 'Ваши мелодии' : 'Публичные мелодии' }}</h2>
       <div class="track-scroll-area">
         <div v-if="tracks.length > 0" class="tracks-list">
-          <!-- Внутри ProfilePage.vue -->
           <MelodyElement
             v-for="track in tracks"
             :key="track.id"
@@ -545,6 +554,7 @@ const handlePublicStatusChanged = ({ trackId, newPublicStatus }) => {
             @like="() => toggleLike(track.id)"
             @play="() => playTrack(track)"
             @public-status-changed="handlePublicStatusChanged"
+            @track-title-updated="handleTrackTitleUpdated"
           />
         </div>
         <p v-else class="empty-state">

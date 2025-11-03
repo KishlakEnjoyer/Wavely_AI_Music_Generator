@@ -227,7 +227,8 @@ const playTrack = async (track) => {
         date: track.date,
         likesCount: track.likesCount ?? 0,
         isLikedByUser: track.isLikedByUser ?? false,
-        pathToFile: track.pathToFile
+        pathToFile: track.pathToFile,
+        publicTrack: track.publicTrack
       }
       // добавляем в tracksStore
       tracksStore.tracks.push(storeTrack)
@@ -412,7 +413,8 @@ onMounted(async () => {
       isLikedByUser: !!userLikes[track.idTrack],
       originalIndex: idx,
       genreId: track.idGenre,
-      pathToFile: track.pathToFile
+      pathToFile: track.pathToFile,
+      publicTrack: track.publicTrack
     }))
 
     // синхронизируем в tracksStore
@@ -797,7 +799,6 @@ const instrumentsForSelect = computed(() => {
 
           <!-- Загрузка треков и еще функция лайков -->
           <div class="track-list">
-            <!-- Заглушка: 4 одинаковых трека -->
               <MelodyElement
                 v-for="track in sortedAndFilteredTracks.slice(0, 8)"
                 :key="track.id"
@@ -1030,7 +1031,7 @@ const instrumentsForSelect = computed(() => {
 
 .bottom-container {
   position: absolute;
-  top: 800px;
+  top: 900px;
   left: 0;
   width: 100%;
   height: 1150px;
