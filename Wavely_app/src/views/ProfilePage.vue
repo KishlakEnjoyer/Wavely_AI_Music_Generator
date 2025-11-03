@@ -129,9 +129,7 @@ async function loadOwnProfileData() {
 
     tracks.value = userTracks.map((track) => {
   let displayTitle = track.titleTrack;
-  if (!track.publicTrack) {
-    displayTitle += " (private)";
-  }
+
   return {
     id: track.idTrack,
     title: displayTitle,
@@ -406,25 +404,6 @@ const saveProfile = async ({ displayName, newPassword }) => {
   }
 };
 
-const handlePublicStatusChanged = ({ trackId, newStatus }) => {
-  // Находим трек в списке и обновляем его статус и заголовок
-  const track = tracks.value.find(t => t.id === trackId);
-  if (track) {
-    track.publicTrack = newStatus;
-    // Добавляем или убираем "(private)" из заголовка
-    if (!newStatus) {
-      // Делаем приватным
-      if (!track.title.endsWith(" (private)")) {
-        track.title += " (private)";
-      }
-    } else {
-      // Делаем публичным
-      if (track.title.endsWith(" (private)")) {
-        track.title = track.title.slice(0, -10); // Убираем " (private)"
-      }
-    }
-  }
-}
 
 // === Уведомления ===
 const showNotification = (message, type = "info") => {
@@ -505,6 +484,13 @@ const playTrack = async (track) => {
     showNotification('Не удалось воспроизвести трек', 'error')
   }
 }
+
+const handlePublicStatusChanged = ({ trackId, newPublicStatus }) => {
+  const track = tracks.value.find(t => t.id === trackId);
+  if (track) {
+    track.publicTrack = newPublicStatus; // Это обновит props.track в MelodyElement
+  }
+};
 
 </script>
 

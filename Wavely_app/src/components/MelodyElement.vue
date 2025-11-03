@@ -60,7 +60,46 @@ const toggleContextMenu = () => {
   isContextMenuOpen.value = !isContextMenuOpen.value;
 };
 
+const togglePublicStatus = async () => {
+  try {
+    // Определяем новое состояние публичности
+    const newPublicStatus = !localPublicTrack.value;
+    
+    const { error } = await supabase
+      .from('tracks') // Замените 'tracks' на точное имя вашей таблицы, если оно другое
+      .update({ publicTrack: newPublicStatus })
+      .eq('idTrack', props.track.id); // Замените 'idTrack' на точное имя столбца первичного ключа, если оно другое
 
+    if (error) {
+      throw error;
+    }
+
+    // Обновляем локальное значение, чтобы интерфейс обновился сразу
+    // Это работает, потому что localPublicTrack - это computed, который зависит от props.track.publicTrack
+    // Мы не можем его напрямую изменить, но можем передать обновленные данные родителю
+    emit('public-status-changed', {
+      trackId: props.track.id,
+      newPublicStatus: newPublicStatus
+    });
+
+    // Закрываем контекстное меню
+    isContextMenuOpen.value = false;
+
+    // Опционально: показать уведомление об успехе
+    emit('notification', {
+      type: 'success',
+      message: `Трек ${newPublicStatus ? 'сделан публичным' : 'сделан приватным'}`
+    });
+
+  } catch (error) {
+    console.error('Ошибка при изменении статуса публикации трека:', error);
+    // Опционально: показать уведомление об ошибке
+    emit('notification', {
+      type: 'error',
+      message: 'Не удалось изменить статус трека'
+    });
+  }
+};
 
 </script>
 
@@ -136,7 +175,7 @@ const toggleContextMenu = () => {
           </defs>
         </svg>
       </span>
-      <span class="track-title">{{ track.title }}</span>
+      <span class="track-title">{{ track.publicTrack ? track.title : track.title + ' (private)' }}</span>
       <span class="separator">|</span>
       <RouterLink
         v-if="showArtistLink"
