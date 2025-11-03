@@ -37,8 +37,7 @@ onMounted(async () => {
         console.log('🔧 Setting audio element in player');
         playerStore.setAudioElement(audio.value);
         
-        // Проверяем состояние audio элемента
-        debugAudio();
+        
     } else {
         console.error('❌ Audio element is null in MediaPlayerComponent!');
         // Попробуем найти audio элемент в DOM

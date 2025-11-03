@@ -13,7 +13,7 @@ const props = defineProps({
     type: Boolean,
     default: true,
   },
-  showMore: {
+  showThreeDots: {
     type: Boolean,
     default: false,
   },
@@ -211,10 +211,10 @@ const toggleContextMenu = () => {
         <span> {{ track.likesCount }}</span>
       </div>
       <div class="track-right">
-      <!-- ... остальной код без изменений ... -->
-      <!-- Изменяем условие отображения кнопки "ещё" -->
+      
+
       <span
-        v-if="showMore && showThreeDots"
+        v-if="showThreeDots"
         ref="moreButtonRef"
         class="more"
         style="font-weight: bold; cursor: pointer"
