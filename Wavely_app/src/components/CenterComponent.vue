@@ -1191,6 +1191,7 @@ const instrumentsForSelect = computed(() => {
   left: 50%;
   transform: translateX(-50%);
   text-align: center;
+  z-index: -2;
 }
 
 .center-container {
