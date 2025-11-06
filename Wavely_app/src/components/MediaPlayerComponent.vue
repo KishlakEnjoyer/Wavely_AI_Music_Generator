@@ -252,6 +252,27 @@ watch(
 
 
 
+watch(
+  () => tracksStore.tracks,
+  () => {
+    const ct = playerStore.currentTrack
+    if (!ct) return
+    
+    // Ищем обновленный трек в tracksStore
+    const updatedTrack = tracksStore.getTrackById(ct.id)
+    if (!updatedTrack) return
+    
+    // ВАЖНО: Не заменяем объект целиком, а обновляем его свойства
+    // Это сохраняет реактивность и ссылочную целостность
+    Object.assign(playerStore.currentTrack, {
+      isLikedByUser: updatedTrack.isLikedByUser,
+      liked: updatedTrack.liked ?? updatedTrack.isLikedByUser,
+      likesCount: updatedTrack.likesCount
+      // Добавьте другие поля, которые могут обновиться
+    })
+  },
+  { deep: true }
+)
 
 watch(() => playerStore.currentTime, (time) => {
     if (audio.value && Math.abs(audio.value.currentTime - time) > 0.5) {
@@ -325,7 +346,7 @@ watch(() => playerStore.isPlaying, (playing) => {
                     </div>
                     <div class="track-details">
                         <p class="track-title">{{ playerStore.currentTrack?.title || 'Выберите трек' }}</p>
-                        <p class="track-artist">{{ playerStore.currentTrack?.artist || 'Неизвестный исполнитель' }}</p>
+                        <p class="track-artist">{{ playerStore.currentTrack?.authorNick || 'Неизвестный исполнитель' }}</p>
                     </div>
                     <button @click.stop="toggleLike" class="like-btn" :class="{ liked: currentLiked }">
                         <svg class="heart-logo" v-if="!playerStore.currentTrack?.liked" width="23" height="23"
