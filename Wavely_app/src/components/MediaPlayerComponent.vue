@@ -70,6 +70,7 @@ const checkAuth = async () => {
     if (session) {
       user.value = session.user
       console.log('Пользователь авторизован:', user.value.email)
+      console.log(user);
     } else {
       console.log('Пользователь не авторизован')
     }

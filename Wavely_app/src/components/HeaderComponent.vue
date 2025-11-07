@@ -40,6 +40,8 @@ const switchToAuth = () => {
 const onLogin = (data) => {
   currentUser.value = data.user
   console.log('Вход успешен:', data)
+  console.log(data.user);
+
 }
 const onRegister = (data) => {
   currentUser.value = data.user

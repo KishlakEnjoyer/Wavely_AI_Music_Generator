@@ -59,7 +59,16 @@ const handleRegister = async () => {
     })
 
     if (error) {
+      console.error('Ошибка регистрации пользователя:', error)
       alert('Ошибка регистрации: ' + error.message)
+      return
+    }
+
+    // Проверяем, что пользователь создан
+    const user = data?.user
+    if (!user) {
+      console.error('Ошибка: данные пользователя отсутствуют после регистрации', data)
+      alert('Ошибка: пользователь не был создан корректно')
       return
     }
 
@@ -72,16 +81,37 @@ const handleRegister = async () => {
 
     if (updateError) {
       console.warn('Не удалось обновить Display name:', updateError)
+      // Важно: не прерываем выполнение, если это не критическая ошибка
     }
 
+    // ✅ Добавляем запись в таблицу profiles
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .insert([
+        {
+          userid: user.id, // Используем ID нового пользователя
+          nickname: nickname // Используем его Display name как ник
+        }
+      ])
+
+    // Проверяем ошибку при добавлении в profiles
+    if (profileError) {
+      console.error('Ошибка при добавлении профиля в таблицу profiles:', profileError)
+      alert('Ошибка при создании профиля: ' + profileError.message)
+      return
+    }
+
+    console.log('Регистрация и создание профиля успешны!')
     alert('Регистрация успешна!')
-    emit('register', { user: data?.user })
+    emit('register', { user: user }) // передаём пользователя, а не data
     close()
   } catch (err) {
-    console.error('Ошибка:', err)
+    console.error('Неожиданная ошибка при регистрации:', err)
     alert('Произошла ошибка при регистрации')
   }
 }
+
+
 
 const onOverlayClick = (e) => {
   if (e.target.classList.contains('modal-overlay')) {
