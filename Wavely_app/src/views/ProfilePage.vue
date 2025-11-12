@@ -2,10 +2,14 @@
 import { ref, onMounted, computed, watch } from "vue";
 import { useRoute } from "vue-router";
 import { supabase } from "@/lib/supabase";
+import { usePlayerStore } from "@/lib/player.js";
+import { useTracksStore } from "@/lib/tracks.js";
 import EditProfileModal from "@/components/EditProfileModal.vue";
 import MelodyElement from "@/components/MelodyElement.vue";
 
 const route = useRoute();
+const playerStore = usePlayerStore();
+const tracksStore = useTracksStore();
 
 // Состояния
 const user = ref(null);
@@ -92,7 +96,7 @@ async function loadOwnProfileData() {
   // Загрузка треков
   const { data: userTracks, error: tracksError } = await supabase
     .from("tracks")
-    .select("idTrack, titleTrack, durationTrack, dateCreation, authorId, publicTrack, profiles!inner(nickname)")
+    .select("idTrack, titleTrack, durationTrack, dateCreation, authorId, publicTrack, pathToFile, profiles!inner(nickname)")
     .eq("authorId", currentUser.value.id)
     .order("dateCreation", { ascending: false });
 
@@ -130,20 +134,19 @@ async function loadOwnProfileData() {
     tracks.value = userTracks.map((track) => {
   let displayTitle = track.titleTrack;
 
-  return {
-    id: track.idTrack,
-    title: displayTitle,
-    author: track.authorId || "Аноним",
-    authorNick: track.profiles.nickname,
-    duration: formatDuration(track.durationTrack),
-    publicTrack: track.publicTrack,
-    date: formatDate(track.dateCreation),
-    dateCreation: track.dateCreation,
-    likesCount: likesMap[track.idTrack] || 0,
-    isLikedByUser: !!userLikes[track.idTrack],
-    pathToFile: track.pathToFile,
-    publicTrack: track.publicTrack
-  };
+    return {
+      id: track.idTrack,
+      title: displayTitle,
+      author: track.authorId || "Аноним",
+      authorNick: track.profiles.nickname,
+      duration: formatDuration(track.durationTrack),
+      date: formatDate(track.dateCreation),
+      dateCreation: track.dateCreation,
+      likesCount: likesMap[track.idTrack] || 0,
+      isLikedByUser: !!userLikes[track.idTrack],
+      pathToFile: track.pathToFile,
+      publicTrack: track.publicTrack
+    };
 });
     stats.value.totalTracks = tracks.value.length;
   }
@@ -160,7 +163,7 @@ async function loadOwnProfileData() {
     const trackIds = givenLikes.map((like) => like.idTrack);
     const { data: likedTrackDetails } = await supabase
       .from("tracks")
-      .select("idTrack, titleTrack, durationTrack, dateCreation, authorId, profiles!inner(nickname), publicTrack")
+      .select("idTrack, titleTrack, durationTrack, dateCreation, authorId, profiles!inner(nickname), publicTrack, pathToFile")
       .in("idTrack", trackIds)
       .order("dateCreation", { ascending: false });
 
@@ -244,7 +247,7 @@ async function loadOtherUserProfileData() {
   // Загрузка только публичных треков
   const { data: userTracks } = await supabase
     .from("tracks")
-    .select("idTrack, titleTrack, durationTrack, dateCreation, publicTrack, authorId, profiles!inner(nickname)")
+    .select("idTrack, titleTrack, durationTrack, dateCreation, publicTrack, pathToFile, authorId, profiles!inner(nickname)")
     .eq("authorId", targetUserId.value)
     .eq("publicTrack", true)
     .order("dateCreation", { ascending: false });
@@ -571,9 +574,11 @@ const handleTrackTitleUpdated = ({ trackId, newTitle }) => {
               v-for="track in likedTracks"
               :key="track.id"
               :track="track"
+              :is-playing="playerStore.currentTrack?.id === track.id"
               :show-artist-link="true"
               :show-more="true"
               @like="() => toggleLike(track.id)"
+              @play="() => playTrack(track)"
             />
           </div>
           <p v-else class="empty-state">Вы ещё не лайкнули ни одной мелодии.</p>

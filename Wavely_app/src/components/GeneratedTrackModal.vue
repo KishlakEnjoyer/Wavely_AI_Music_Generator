@@ -85,6 +85,7 @@ const formatTime = (seconds) => {
 </script>
 
 <template>
+  <Teleport to="body">
   <div v-if="show" class="modal-backdrop" @click.self="close">
     <div class="modal-body">
       <div class="modal-title">Параметры трека</div>
@@ -132,10 +133,11 @@ const formatTime = (seconds) => {
       </div>
     </div>
   </div>
+  </Teleport>
   </template>
 
 <style scoped>
-.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index: 1000; }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index: 2000; }
 .modal-body { width: 520px; background: #191919; border: 1px solid #00000027; border-radius: 16px; padding: 18px; color: #f3f3f3; }
 .modal-title { font-weight: 700; margin-bottom: 12px; }
 .modal-field { margin-bottom: 12px; }

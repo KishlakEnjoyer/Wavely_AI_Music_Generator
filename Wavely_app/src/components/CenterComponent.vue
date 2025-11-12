@@ -65,6 +65,8 @@ const submitPrompt = async () => {
     generationStatus.value = 'Загрузка сгенерированного файла...'
     generationProgress.value = 75
     const blob = await api.downloadFile(job_id)
+    // Предпросмотр без сохранения: сохраняем Blob для последующей записи при «Сохранить»
+    generatedBlob.value = blob
     
     generationStatus.value = 'Сохранение трека...'
     generationProgress.value = 85
@@ -73,63 +75,17 @@ const submitPrompt = async () => {
     const uuid = generateUUID();
     const fileName = `track_${timestamp}_${uuid}.${ext}`
     const filePath = fileName
-    const { error: upErr } = await supabase.storage.from('tracks').upload(filePath, blob, { contentType: 'audio/wav' })
-    if (upErr) throw upErr
-    
-    // Создаем полный URL для Supabase Storage
-    const { data: { publicUrl } } = supabase.storage.from('tracks').getPublicUrl(filePath)
-    
-    // Обязательные поля: жанр, настроение и существующий профиль автора
-    const effectiveGenreId = selectedGenreGen.value ?? genres.value.find(g => g.idGenre !== 'all')?.idGenre
-    const effectiveMoodId = selectedMood.value ?? moods.value[0]?.idMood
-
-    if (!effectiveGenreId || !effectiveMoodId) {
-      showNotification('Пожалуйста, выберите жанр и настроение', 'error')
-      throw new Error('Missing required genre or mood for tracks insert')
-    }
-
-    // Убедимся, что профиль автора существует (FK tracks.authorId -> profiles.userid)
-    if (user.value?.id) {
-      const { data: profileRows, error: profileCheckErr } = await supabase
-        .from('profiles')
-        .select('userid')
-        .eq('userid', user.value.id)
-
-      if (!profileCheckErr && (!profileRows || profileRows.length === 0)) {
-        const nickname = user.value?.user_metadata?.display_name || user.value?.email?.split('@')[0] || 'User'
-        const { error: profileCreateErr } = await supabase
-          .from('profiles')
-          .insert([{ userid: user.value.id, nickname }])
-        if (profileCreateErr) throw profileCreateErr
-      }
-    }
-
-    const { data: inserted, error: insErr } = await supabase
-      .from('tracks')
-      .insert([{ titleTrack: 'Untitled track', pathToFile: publicUrl, idGenre: effectiveGenreId, idMood: effectiveMoodId, durationTrack: Math.round(selectedDuration.value), dateCreation: new Date().toISOString().slice(0, 10), publicTrack: false, authorId: user.value.id }])
-      .select('idTrack, titleTrack, publicTrack')
-      .single()
-    if (insErr) throw insErr
-    if (selectedInstruments.value.length > 0) {
-      const instrumentInserts = selectedInstruments.value.map(instrumentId => ({
-        idTrack: inserted.idTrack,
-        idInstrument: instrumentId
-      }))
-      await supabase.from('track_instrument').insert(instrumentInserts)
-    }
     generationStatus.value = 'Завершение...'
     generationProgress.value = 95
     const audioUrl = URL.createObjectURL(blob)
-    generatedTrack.value = { id: inserted.idTrack, title: inserted.titleTrack, audioUrl, storagePath: filePath, publicTrack: inserted.publicTrack }
+    generatedTrack.value = { id: null, title: 'Untitled track', audioUrl, publicTrack: false }
     
     generationStatus.value = 'Готово!'
     generationProgress.value = 100
-    // Откроем модалку после обновления DOM, чтобы гарантировать наличие generatedTrack
     await Promise.resolve()
     isGeneratedModalOpen.value = true
     showNotification('Трек сгенерирован', 'success')
     
-    // Очищаем статус через небольшую задержку
     setTimeout(() => {
       generationStatus.value = ''
       generationProgress.value = 0
@@ -139,7 +95,6 @@ const submitPrompt = async () => {
     showNotification('Ошибка генерации или сохранения трека', 'error')
   } finally {
     submitInProgress.value = false
-    // Если произошла ошибка, очищаем статус
     if (generationStatus.value && !generationStatus.value.includes('Готово')) {
       generationStatus.value = ''
       generationProgress.value = 0
@@ -147,11 +102,11 @@ const submitPrompt = async () => {
   }
 }
 const handlePress = () => { if (!hasText.value) return; isPressed.value = true; setTimeout(() => isPressed.value = false, 300) }
-// Поиск
+
 const searchTerm = ref("");
-// Сортировка
+
 const sortOption = ref("default");
-// жанр
+
 const genres = ref([])
 const selectedGenre = ref('all')
 const selectedGenreGen = ref(null)
@@ -162,6 +117,7 @@ const selectedInstruments = ref([])
 const durations = ref([5,10,15,20,30,45,60,90,120])
 const selectedDuration = ref(15)
 const generatedTrack = ref(null)
+const generatedBlob = ref(null)
 const isGeneratedModalOpen = ref(false)
 
 // Supabase данные
@@ -475,6 +431,96 @@ const showNotification = (message, type = "info") => {
 };
 
 
+// Закрытие модалки: ничего не сохраняем, просто закрываем
+const onGeneratedModalClose = () => {
+  isGeneratedModalOpen.value = false
+  showNotification('Действие отменено, трек не сохранён', 'info')
+}
+
+// Сохранение: загружаем файл в Storage, создаём запись в БД и привязываем инструменты
+const onGeneratedModalSave = async ({ title, publish }) => {
+  try {
+    if (!generatedBlob.value) {
+      showNotification('Нет данных трека для сохранения', 'error')
+      return
+    }
+
+    // Проверим обязательные поля
+    const effectiveGenreId = selectedGenreGen.value ?? genres.value.find(g => g.idGenre !== 'all')?.idGenre
+    const effectiveMoodId = selectedMood.value ?? moods.value[0]?.idMood
+    if (!effectiveGenreId || !effectiveMoodId) {
+      showNotification('Пожалуйста, выберите жанр и настроение', 'error')
+      return
+    }
+
+    // Убедимся, что профиль автора существует (FK tracks.authorId -> profiles.userid)
+    if (user.value?.id) {
+      const { data: profileRows, error: profileCheckErr } = await supabase
+        .from('profiles')
+        .select('userid')
+        .eq('userid', user.value.id)
+
+      if (!profileCheckErr && (!profileRows || profileRows.length === 0)) {
+        const nickname = user.value?.user_metadata?.display_name || user.value?.email?.split('@')[0] || 'User'
+        const { error: profileCreateErr } = await supabase
+          .from('profiles')
+          .insert([{ userid: user.value.id, nickname }])
+        if (profileCreateErr) throw profileCreateErr
+      }
+    }
+
+    // Загружаем файл в Storage
+    const ext = 'wav'
+    const timestamp = Date.now()
+    const uuid = generateUUID();
+    const fileName = `track_${timestamp}_${uuid}.${ext}`
+    const filePath = fileName
+    const { error: upErr } = await supabase.storage.from('tracks').upload(filePath, generatedBlob.value, { contentType: 'audio/wav' })
+    if (upErr) throw upErr
+
+    // Публичный URL
+    const { data: { publicUrl } } = supabase.storage.from('tracks').getPublicUrl(filePath)
+
+    // Вставка трека
+    const { data: inserted, error: insErr } = await supabase
+      .from('tracks')
+      .insert([{ 
+        titleTrack: (title && title.trim()) || 'Untitled track', 
+        pathToFile: publicUrl, 
+        idGenre: effectiveGenreId, 
+        idMood: effectiveMoodId, 
+        durationTrack: Math.round(selectedDuration.value), 
+        dateCreation: new Date().toISOString().slice(0, 10), 
+        publicTrack: !!publish, 
+        authorId: user.value.id 
+      }])
+      .select('idTrack')
+      .single()
+    if (insErr) throw insErr
+
+    // Привяжем инструменты, если выбраны
+    if (selectedInstruments.value.length > 0) {
+      const instrumentInserts = selectedInstruments.value.map(instrumentId => ({
+        idTrack: inserted.idTrack,
+        idInstrument: instrumentId
+      }))
+      await supabase.from('track_instrument').insert(instrumentInserts)
+    }
+
+    // Обновим локальное состояние
+    generatedTrack.value.id = inserted.idTrack
+    generatedTrack.value.title = (title && title.trim()) || 'Untitled track'
+    generatedTrack.value.publicTrack = !!publish
+
+    isGeneratedModalOpen.value = false
+    showNotification('Сохранено', 'success')
+  } catch (e) {
+    console.error('Ошибка сохранения трека:', e)
+    showNotification('Не удалось сохранить', 'error')
+  }
+}
+
+
 
 const instrumentsForSelect = computed(() => {
   return instruments.value.map(instrument => ({
@@ -566,16 +612,8 @@ const instrumentsForSelect = computed(() => {
               v-if="isGeneratedModalOpen && generatedTrack" 
               :show="isGeneratedModalOpen" 
               :track="generatedTrack" 
-              @close="isGeneratedModalOpen = false" 
-              @save="async ({ title, publish }) => { 
-                try { 
-                  await supabase.from('tracks').update({ titleTrack: title, publicTrack: !!publish }).eq('idTrack', generatedTrack.id)
-                  generatedTrack.title = title
-                  generatedTrack.publicTrack = !!publish
-                  isGeneratedModalOpen = false
-                  showNotification('Сохранено', 'success')
-                } catch { showNotification('Не удалось сохранить', 'error') } 
-              }" />
+              @close="onGeneratedModalClose" 
+              @save="onGeneratedModalSave" />
         </div>
         <div class="logo-decor">
             <svg width="168" height="39" viewBox="0 0 168 39" fill="none" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
