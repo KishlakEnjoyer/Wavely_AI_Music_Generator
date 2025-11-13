@@ -38,8 +38,10 @@ const close = () => {
   emit('close')
 }
 
-const save = () => emit('save', { title: title.value.trim() || 'Untitled track', publish: publish.value })
-
+const save = () => {
+  emit('save', { title: title.value.trim() || 'Untitled track', publish: publish.value });
+  window.location.reload();
+}
 // Функции аудиоплеера
 const togglePlay = () => {
   if (!audioRef.value) return
