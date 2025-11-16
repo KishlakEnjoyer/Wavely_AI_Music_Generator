@@ -1,0 +1,13 @@
+django
+python-decouple
+djangorestframework
+django-cors-headers
+djangorestframework-simplejwt
+drf-spectacular
+mysqlclient
+boto3
+pillow
+celery
+redis
+django-celery-beat
+django_celery_results
